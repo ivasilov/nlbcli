@@ -13,6 +13,7 @@ setuptools.setup(
         'console_scripts': ['nlbcli=nlbcli.__main__:main']
     },
     install_requires=[
+        'setuptools',
         'requests>=2.25.0',
         'beautifulsoup4>=4.9.3'
     ],
