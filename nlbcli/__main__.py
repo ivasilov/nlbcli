@@ -64,7 +64,7 @@ def main():
                 "SaveFilter": "False",
                 "RemoveFilter": "False",
                 "PageNumber": "",
-                "PageSize": "",
+                "PageSize": "100",
                 "DetailsView": "0",
                 "SelectedItem": "",
                 "PageId": "",
