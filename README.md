@@ -14,9 +14,23 @@ This is a Typescript implementation of the [nlbcli](https://github.com/whoeveres
 
 ## Install
 
-```bash
+```zsh
 npm install nlbcli -g
 ```
+
+You can add code completions by running:
+
+```zsh
+source <(nlbcli --completions zsh)
+```
+
+You can replace `zsh` with `bash` or `sh`  or `fish`.
+
+If you want to also use this CLI with your AI agent, you can install the following skill:
+
+```zsh
+npx skills add ivasilov/nlbcli
+``` 
 
 ## Authentication
 

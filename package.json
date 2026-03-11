@@ -1,7 +1,7 @@
 {
   "name": "nlbcli",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.0.3",
   "description": "A CLI tool for managing NLB Tutunska accounts and cards.",
   "author": "Ivan Vasilov <vasilov.ivan@mail.com>",
   "license": "MIT",
@@ -16,6 +16,9 @@
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "nlbcli": "./dist/index.mjs"
   },
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
@@ -51,5 +54,10 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "keywords": [
+    "nlb",
+    "banking",
+    "cli"
+  ]
 }

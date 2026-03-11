@@ -1,6 +1,8 @@
+#!/usr/bin/env node
 import { Args, Command, Options } from "@effect/cli"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Effect, Option } from "effect"
+import packageJson from "../package.json"
 import { cmdLogin, getSession, prompt } from "./auth"
 import {
   cmdAccountBalance,
@@ -233,7 +235,7 @@ const command = Command.make("nlbcli").pipe(
 
 const cli = Command.run(command, {
   name: "nlbcli",
-  version: "1.0.0",
+  version: packageJson.version,
 })
 
 cli(process.argv).pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain)
