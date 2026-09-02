@@ -1,36 +1,20 @@
 import readline from "node:readline"
 import { BASE_URL, COOKIES_FILE } from "./constants"
-import { isLoginRedirect, nlbGet } from "./http"
+import {
+  type HttpResponse,
+  isLoginRedirect,
+  mergeCookieHeader,
+  NlbHttpClient,
+  nlbGet,
+} from "./http"
 import { loadState, saveCookies } from "./state"
 
 function parseSetCookies(res: Response): string[] {
   return res.headers.getSetCookie?.() ?? []
 }
 
-function mergeCookies(existing: string, newSetCookies: string[]): string {
-  const jar: Record<string, string> = {}
-  if (existing) {
-    for (const pair of existing.split("; ")) {
-      const [name, ...rest] = pair.split("=")
-      if (name) {
-        jar[name.trim()] = rest.join("=")
-      }
-    }
-  }
-  for (const sc of newSetCookies) {
-    const nameValue = sc.split(";")[0]
-    const [name, ...rest] = nameValue.split("=")
-    if (name) {
-      jar[name.trim()] = rest.join("=")
-    }
-  }
-  return Object.entries(jar)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("; ")
-}
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: <explanation>
-async function loginWithPush(username: string): Promise<string> {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: login mirrors NLB's multi-step push protocol
+export async function loginWithPush(username: string): Promise<string> {
   let cookies = ""
 
   // Step 1: GET login page to get session cookies
@@ -38,7 +22,7 @@ async function loginWithPush(username: string): Promise<string> {
   const loginPageRes = await fetch(`${BASE_URL}/Account/Login`, {
     redirect: "manual",
   })
-  cookies = mergeCookies(cookies, parseSetCookies(loginPageRes))
+  cookies = mergeCookieHeader(cookies, parseSetCookies(loginPageRes))
 
   // Follow redirect if needed
   if (loginPageRes.status >= 300 && loginPageRes.status < 400) {
@@ -51,7 +35,7 @@ async function loginWithPush(username: string): Promise<string> {
         headers: { Cookie: cookies },
         redirect: "manual",
       })
-      cookies = mergeCookies(cookies, parseSetCookies(redirectRes))
+      cookies = mergeCookieHeader(cookies, parseSetCookies(redirectRes))
     }
   }
 
@@ -67,7 +51,7 @@ async function loginWithPush(username: string): Promise<string> {
     body: new URLSearchParams({ UserName: username }).toString(),
     redirect: "manual",
   })
-  cookies = mergeCookies(cookies, parseSetCookies(pushRes))
+  cookies = mergeCookieHeader(cookies, parseSetCookies(pushRes))
 
   const pushData = (await pushRes.json()) as {
     Success: boolean
@@ -102,7 +86,7 @@ async function loginWithPush(username: string): Promise<string> {
         redirect: "manual",
       }
     )
-    cookies = mergeCookies(cookies, parseSetCookies(statusRes))
+    cookies = mergeCookieHeader(cookies, parseSetCookies(statusRes))
 
     const statusData = (await statusRes.json()) as {
       Success: boolean
@@ -129,7 +113,7 @@ async function loginWithPush(username: string): Promise<string> {
         }).toString(),
         redirect: "manual",
       })
-      cookies = mergeCookies(cookies, parseSetCookies(loginRes))
+      cookies = mergeCookieHeader(cookies, parseSetCookies(loginRes))
 
       const loginData = (await loginRes.json()) as {
         UserAuthenticated: boolean
@@ -153,7 +137,7 @@ async function loginWithPush(username: string): Promise<string> {
           headers: { Cookie: cookies },
           redirect: "manual",
         })
-        cookies = mergeCookies(cookies, parseSetCookies(finalRes))
+        cookies = mergeCookieHeader(cookies, parseSetCookies(finalRes))
       }
 
       console.log("Login successful!")
@@ -164,6 +148,61 @@ async function loginWithPush(username: string): Promise<string> {
   }
 
   throw new Error("Timed out waiting for push approval.")
+}
+
+export interface AuthenticatedPath {
+  client: NlbHttpClient
+  response: HttpResponse
+}
+
+export interface AuthenticatedPathDependencies {
+  load?: typeof loadState
+  login?: typeof loginWithPush
+  persist?: typeof saveCookies
+}
+
+/**
+ * Opens the command's target page as the session check, avoiding the otherwise
+ * redundant balances-page request. The target is retried only after a confirmed
+ * login redirect, never after a state-changing POST.
+ */
+export async function openAuthenticatedPath(
+  urlPath: string,
+  dependencies: AuthenticatedPathDependencies = {}
+): Promise<AuthenticatedPath> {
+  const load = dependencies.load ?? loadState
+  const login = dependencies.login ?? loginWithPush
+  const persist = dependencies.persist ?? saveCookies
+  const state = load()
+  if (!state) {
+    throw new Error("No saved session. Run `nlbcli login` first.")
+  }
+
+  let client = new NlbHttpClient(state.cookie)
+  let response = await client.get(urlPath)
+
+  if (isLoginRedirect(response)) {
+    if (!state.username) {
+      throw new Error(
+        "Session expired and no username is saved. Run `nlbcli login` first."
+      )
+    }
+    console.log("Session expired, re-authenticating...")
+    client = new NlbHttpClient(await login(state.username))
+    response = await client.get(urlPath)
+  } else {
+    console.log("Using saved session.")
+  }
+
+  if (isLoginRedirect(response)) {
+    throw new Error("NLB Klik redirected to login after re-authentication.")
+  }
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`NLB Klik returned HTTP ${response.status} for ${urlPath}.`)
+  }
+
+  persist(client.cookieHeader, state.username)
+  return { client, response }
 }
 
 export async function getSession(_username?: string): Promise<string> {

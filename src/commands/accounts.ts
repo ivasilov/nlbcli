@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-// biome-ignore lint/performance/noNamespaceImport: <explanation>
+// biome-ignore lint/performance/noNamespaceImport: Cheerio's namespace API is used throughout this parser
 import * as cheerio from "cheerio"
 import { dateFmt } from "../constants"
 import { nlbGet, nlbPost } from "../http"

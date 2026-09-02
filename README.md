@@ -71,6 +71,42 @@ nlbcli accounts transactions <ACCOUNT_ID> \
 | `nlbcli cards balance <CARD_ID>` | Show card balance and details |
 | `nlbcli cards transactions <CARD_ID>` | List card transactions |
 
+### Payments
+
+Create a saved payment order without signing it:
+
+```bash
+nlbcli payments create pp30 \
+  --source="210-0000000000-00MKD" \
+  --destination="300-0000000000-00" \
+  --amount="1250.00" \
+  --purpose-code="289" \
+  --purpose="Invoice 123"
+```
+
+Use `payments send` with the same options to review and sign an order. Sending
+requires an interactive terminal: the CLI displays the resolved payment details
+and submits only after you type `SEND`. Complete the authorization in mKlik when
+prompted. There is intentionally no non-interactive confirmation flag.
+
+Supported order types and additional options:
+
+| Type | Required options | Optional options |
+|------|------------------|------------------|
+| `pp30` | `--source`, `--destination`, `--amount`, `--purpose-code` | `--purpose`, `--recipient-name`, `--recipient-address`, `--debit-reference`, `--credit-reference`, `--date`, `--urgent` |
+| `pp50` | `--source`, `--destination`, `--amount` | `--purpose`, `--recipient-name`, `--recipient-address`, `--debit-reference`, `--payee-account`, `--budgetary-account`, `--income-code-program`, `--date`, `--urgent` |
+| `pp53` | `--source`, `--folio` | `--date`, `--urgent` |
+
+PP53 totals are resolved from NLB using the folio number. For PP50, NLB can
+derive `--income-code-program` when `--payee-account` or `--budgetary-account`
+is supplied. For external or unknown destination accounts, pass both
+`--recipient-name` and `--recipient-address`.
+
+> [!WARNING]
+> If a create or send request ends with an unknown result or a network failure,
+> do not retry it. First verify the order in NLB Klik to avoid creating a
+> duplicate payment.
+
 ### Output formats
 
 Use `--format` to control output: `tab` (default), `csv`, `json`, `xls`, or `pdf`. File exports (`xls`, `pdf`) are saved to a `downloads/` directory when NLB returns a valid report file.
