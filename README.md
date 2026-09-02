@@ -73,7 +73,7 @@ nlbcli accounts transactions <ACCOUNT_ID> \
 
 ### Output formats
 
-Use `--format` to control output: `tab` (default for balance), `csv`, `json`, `xls` (default for transactions), `pdf`. File exports (`xls`, `pdf`) are saved to a `downloads/` directory.
+Use `--format` to control output: `tab` (default), `csv`, `json`, `xls`, or `pdf`. File exports (`xls`, `pdf`) are saved to a `downloads/` directory when NLB returns a valid report file.
 
 Run `nlbcli --help` for all available commands and options.
 
