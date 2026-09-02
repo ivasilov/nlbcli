@@ -1,11 +1,11 @@
 ---
 name: nlbcli
-description: Work with the NLB CLI tool for interacting with NLB bank accounts and cards. Use when the user wants to check balances, list transactions, manage accounts or cards, authenticate, or troubleshoot issues with nlbklik.com.mk.
+description: Work with the NLB CLI tool for interacting with NLB bank accounts, cards, and payments. Use when the user wants to check balances, list transactions, manage accounts or cards, create or send payment orders, authenticate, or troubleshoot issues with nlbklik.com.mk.
 ---
 
 # NLB Tutunska CLI
 
-`nlbcli` is a CLI for interacting with NLB Tutunska (nlbklik.com.mk) internet banking. Use it to check account balances, list transactions, view card details, and more.
+`nlbcli` is a CLI for interacting with NLB Tutunska (nlbklik.com.mk) internet banking. Use it to check account balances, list transactions, view card details, and create or send PP30, PP50, and PP53 payment orders.
 
 ## Prerequisites
 
@@ -36,7 +36,25 @@ nlbcli accounts reservations <id>          # List pending reservations
 nlbcli cards list                          # List card IDs
 nlbcli cards balance <id>                  # Show card balance/details
 nlbcli cards transactions <id>             # List card transactions
+nlbcli payments create <type> [opts]       # Validate and save a payment order
+nlbcli payments send <type> [opts]         # Review, sign, and submit a payment
 ```
+
+Payment types are `pp30`, `pp50`, and `pp53`. All require `--source`.
+
+- PP30 also requires `--destination`, `--amount`, and `--purpose-code`.
+- PP50 also requires `--destination` and `--amount`; its income-code and
+  payee/budgetary account flags are optional.
+- PP53 also requires `--folio`; NLB resolves its total and number of orders.
+- External or unknown destination accounts require `--recipient-name` and
+  `--recipient-address`.
+- `--date` defaults to today. Use `--urgent` to request MIPS.
+
+`payments send` always prints the resolved payment and requires the user to type
+`SEND` in an interactive terminal. Never attempt to bypass that confirmation.
+The user must approve the authorization in mKlik. If the CLI reports an unknown
+or timed-out result, do not retry; ask the user to verify the order in NLB Klik
+first.
 
 ## Output formats
 
@@ -75,8 +93,24 @@ Use `--type` to filter by transaction type and `--name` to filter by name/descri
 2. Run `nlbcli cards balance <id>` for card details
 3. Run `nlbcli cards transactions <id>` for card transaction history
 
+### Create or send a PP30 payment
+
+```
+nlbcli payments create pp30 \
+  --source <account-id> \
+  --destination <recipient-account> \
+  --amount <mkd-amount> \
+  --purpose-code <code>
+```
+
+Use `payments send` instead of `payments create` only when the user explicitly
+wants to submit the payment. Stay with the user through the interactive review
+and mKlik authorization result.
+
 ## Troubleshooting
 
 - **Session expired**: Run `nlbcli login` to re-authenticate
 - **Command not found**: Ensure `nlbcli` is installed and in PATH
 - **No data returned**: The account/card ID may be incorrect — verify with `accounts list` or `cards list`
+- **Payment status unknown**: Do not retry — verify the order in NLB Klik first
+- **Recipient details required**: Add `--recipient-name` and `--recipient-address` for an external account
