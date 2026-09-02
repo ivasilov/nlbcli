@@ -31,7 +31,7 @@ const formatOption = Options.text("format").pipe(
 
 const transactionsFormatOption = Options.text("format").pipe(
   Options.withDescription("Output format (tab|csv|json|xls|pdf)"),
-  Options.withDefault("xls")
+  Options.withDefault("tab")
 )
 
 const startOption = Options.text("start").pipe(

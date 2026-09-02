@@ -108,11 +108,30 @@ export async function cmdAccountTransactions(
     data.Report = format === "xls" ? "Excel" : "Pdf"
     const res = await nlbPost("/Retail/Transactions", cookie, data)
     const disposition = (res.headers["content-disposition"] as string) || ""
+    const contentType = (
+      (res.headers["content-type"] as string) || ""
+    ).toLowerCase()
+    const expectedContentType =
+      format === "pdf" ? "application/pdf" : "application/vnd.ms-excel"
+
+    if (
+      res.status < 200 ||
+      res.status >= 300 ||
+      res.body.length === 0 ||
+      !(disposition || contentType.includes(expectedContentType))
+    ) {
+      throw new Error(
+        `NLB did not return a valid ${format.toUpperCase()} file. Try --format tab, csv, or json.`
+      )
+    }
+
     const match = disposition.match(filenameRegex)
     const ext = format === "pdf" ? "pdf" : "xls"
-    const filename = match
-      ? match[1].replace(/['"]/g, "")
-      : `transactions_${accountId}_${dateFmt(new Date())}.${ext}`
+    const filename = path.basename(
+      match
+        ? match[1].replace(/['"]/g, "")
+        : `transactions_${accountId}_${dateFmt(new Date())}.${ext}`
+    )
 
     const downloadsDir = path.join(process.cwd(), "downloads")
     if (!fs.existsSync(downloadsDir)) {
