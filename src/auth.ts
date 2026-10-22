@@ -1,6 +1,12 @@
 import readline from "node:readline"
 import { BASE_URL } from "./constants"
-import { isLoginRedirect, nlbGet } from "./http"
+import {
+  authenticationError,
+  bankResponseError,
+  CliError,
+  EXIT_CODES,
+} from "./errors"
+import { bankFetch, nlbGet, readBankJson, requireBalancesPage } from "./http"
 import {
   getSessionFile,
   loadState,
@@ -34,7 +40,7 @@ function mergeCookies(existing: string, newSetCookies: string[]): string {
     .join("; ")
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The push login flow handles multiple sequential responses and polling.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The push login protocol has several sequential authentication steps.
 async function loginWithPush(
   profile: string,
   username: string
@@ -43,8 +49,8 @@ async function loginWithPush(
   let cookies = ""
 
   // Step 1: GET login page to get session cookies
-  console.log("Fetching login page...")
-  const loginPageRes = await fetch(`${BASE_URL}/Account/Login`, {
+  console.error("Fetching login page...")
+  const loginPageRes = await bankFetch(`${BASE_URL}/Account/Login`, {
     redirect: "manual",
   })
   cookies = mergeCookies(cookies, parseSetCookies(loginPageRes))
@@ -56,7 +62,7 @@ async function loginWithPush(
       const redirectUrl = location.startsWith("http")
         ? location
         : `${BASE_URL}${location}`
-      const redirectRes = await fetch(redirectUrl, {
+      const redirectRes = await bankFetch(redirectUrl, {
         headers: { Cookie: cookies },
         redirect: "manual",
       })
@@ -65,8 +71,8 @@ async function loginWithPush(
   }
 
   // Step 2: Send push notification
-  console.log("Sending push notification...")
-  const pushRes = await fetch(`${BASE_URL}/Account/SendLoginPushMessage`, {
+  console.error("Sending push notification...")
+  const pushRes = await bankFetch(`${BASE_URL}/Account/SendLoginPushMessage`, {
     method: "POST",
     headers: {
       Cookie: cookies,
@@ -78,17 +84,24 @@ async function loginWithPush(
   })
   cookies = mergeCookies(cookies, parseSetCookies(pushRes))
 
-  const pushData = (await pushRes.json()) as {
-    Success: boolean
-    Message: string
-    OldMtoken?: boolean
+  const pushData = await readBankJson(pushRes)
+  if (
+    typeof pushData.Success !== "boolean" ||
+    typeof pushData.Message !== "string"
+  ) {
+    throw bankResponseError(
+      "NLB returned an invalid push notification response."
+    )
   }
   if (!pushData.Success) {
-    throw new Error(`Push notification failed: ${pushData.Message}`)
+    throw new CliError(
+      EXIT_CODES.authentication,
+      `Push notification failed: ${pushData.Message}`
+    )
   }
 
   const loginId = pushData.Message
-  console.log("Check your phone! Waiting up to 120s...")
+  console.error("Check your phone! Waiting up to 120s...")
 
   // Step 3: Poll /Account/CheckPushCallbackStatus until approved
   const start = Date.now()
@@ -98,7 +111,7 @@ async function loginWithPush(
   while (Date.now() - start < timeout) {
     await new Promise((r) => setTimeout(r, interval))
 
-    const statusRes = await fetch(
+    const statusRes = await bankFetch(
       `${BASE_URL}/Account/CheckPushCallbackStatus`,
       {
         method: "POST",
@@ -113,90 +126,112 @@ async function loginWithPush(
     )
     cookies = mergeCookies(cookies, parseSetCookies(statusRes))
 
-    const statusData = (await statusRes.json()) as {
-      Success: boolean
-      Error?: string
+    const statusData = await readBankJson(statusRes)
+    if (typeof statusData.Success !== "boolean") {
+      throw bankResponseError("NLB returned an invalid push approval response.")
     }
 
     if (statusData.Error) {
-      throw new Error(`Push login failed: ${statusData.Error}`)
+      throw new CliError(
+        EXIT_CODES.authentication,
+        `Push login failed: ${statusData.Error}`
+      )
     }
 
     if (statusData.Success) {
       // Step 4: Submit the login form with the loginId
-      console.log("Push approved! Completing login...")
-      const loginRes = await fetch(`${BASE_URL}/Account/LoginUserNamePush`, {
-        method: "POST",
-        headers: {
-          Cookie: cookies,
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        body: new URLSearchParams({
-          UserName: username,
-          LoginId: loginId,
-        }).toString(),
-        redirect: "manual",
-      })
+      console.error("Push approved! Completing login...")
+      const loginRes = await bankFetch(
+        `${BASE_URL}/Account/LoginUserNamePush`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: cookies,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: new URLSearchParams({
+            UserName: username,
+            LoginId: loginId,
+          }).toString(),
+          redirect: "manual",
+        }
+      )
       cookies = mergeCookies(cookies, parseSetCookies(loginRes))
 
-      const loginData = (await loginRes.json()) as {
-        UserAuthenticated: boolean
-        Key?: string
-        RedirectionUrl?: string
-        ErrorMessage?: string
+      const loginData = await readBankJson(loginRes)
+      if (
+        typeof loginData.UserAuthenticated !== "boolean" ||
+        (loginData.RedirectionUrl !== undefined &&
+          typeof loginData.RedirectionUrl !== "string")
+      ) {
+        throw bankResponseError("NLB returned an invalid login response.")
       }
 
       if (!loginData.UserAuthenticated) {
-        throw new Error(
+        throw new CliError(
+          EXIT_CODES.authentication,
           `Login failed: ${loginData.ErrorMessage ?? "unknown error"}`
         )
       }
 
       // Step 5: Follow the redirection URL to get final session cookies
-      if (loginData.RedirectionUrl) {
+      if (
+        typeof loginData.RedirectionUrl === "string" &&
+        loginData.RedirectionUrl
+      ) {
         const redirectUrl = loginData.RedirectionUrl.startsWith("http")
           ? loginData.RedirectionUrl
           : `${BASE_URL}${loginData.RedirectionUrl}`
-        const finalRes = await fetch(redirectUrl, {
+        const finalRes = await bankFetch(redirectUrl, {
           headers: { Cookie: cookies },
           redirect: "manual",
         })
         cookies = mergeCookies(cookies, parseSetCookies(finalRes))
       }
 
-      console.log("Login successful!")
+      console.error("Login successful!")
       saveCookies(profile, cookies, username)
-      console.log(`Session saved to ${getSessionFile(profile)}`)
+      console.error(`Session saved to ${getSessionFile(profile)}`)
       return cookies
     }
   }
 
-  throw new Error("Timed out waiting for push approval.")
+  throw new CliError(
+    EXIT_CODES.authentication,
+    "Timed out waiting for push approval."
+  )
 }
 
 export async function getSession(
   profile: string,
-  _username?: string
+  _username?: string,
+  { nonInteractive = false }: { nonInteractive?: boolean } = {}
 ): Promise<string> {
-  let username: string | undefined = _username
+  let username = _username
   const state = loadState(profile)
   if (state) {
-    const res = await nlbGet(
-      "/Home/Balances?bankid=tutunska.banka@ibank",
-      state.cookie
-    )
-    if (!isLoginRedirect(res)) {
-      console.log("Using saved session.")
+    username ||= state.username
+    try {
+      requireBalancesPage(
+        await nlbGet("/Home/Balances?bankid=tutunska.banka@ibank", state.cookie)
+      )
+      console.error("Using saved session.")
       return state.cookie
+    } catch (error) {
+      if (
+        !(error instanceof CliError) ||
+        error.exitCode !== EXIT_CODES.authentication
+      ) {
+        throw error
+      }
     }
-    console.log("Session expired, re-authenticating...")
-    username = username || state.username
+    if (!nonInteractive) {
+      console.error("Session expired, re-authenticating...")
+    }
   }
-  if (!username) {
-    throw new Error(
-      `No username available. Run \`nlbcli --profile ${profile} login --username <user>\` first.`
-    )
+  if (nonInteractive || !username) {
+    throw authenticationError(profile, username)
   }
   return loginWithPush(profile, username)
 }
@@ -211,7 +246,7 @@ export async function cmdLogin(
 export function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: process.stderr,
   })
   return new Promise((resolve) => {
     rl.question(question, (answer) => {

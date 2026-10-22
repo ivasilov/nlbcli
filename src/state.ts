@@ -65,8 +65,11 @@ export function loadState(
     const file = fs.openSync(sessionFile, sessionReadFlags)
     try {
       const data = JSON.parse(fs.readFileSync(file, "utf-8"))
-      return data.cookie
-        ? { cookie: data.cookie, username: data.username || "" }
+      return typeof data?.cookie === "string" && data.cookie.trim()
+        ? {
+            cookie: data.cookie,
+            username: typeof data.username === "string" ? data.username : "",
+          }
         : null
     } finally {
       fs.closeSync(file)

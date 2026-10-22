@@ -1,13 +1,20 @@
 import fs from "node:fs"
 import path from "node:path"
-// biome-ignore lint/performance/noNamespaceImport: <explanation>
+// biome-ignore lint/performance/noNamespaceImport: Cheerio exposes its parser through the module namespace.
 import * as cheerio from "cheerio"
 import { dateFmt } from "../constants"
-import { nlbGet, nlbPost } from "../http"
+import { bankResponseError } from "../errors"
+import {
+  nlbGet,
+  nlbPost,
+  requireBalancesPage,
+  requireHtml,
+  TABLE_HTML,
+} from "../http"
 
 export async function cmdListAccounts(cookie: string): Promise<string[]> {
   const res = await nlbGet("/Home/Balances?bankid=tutunska.banka@ibank", cookie)
-  const html = res.body.toString("utf-8")
+  const html = requireBalancesPage(res)
   return [
     ...new Set(html.match(/[0-9]{3}-[0-9]{10}-[0-9]{2}[A-Z]{2,3}/g) || []),
   ]
@@ -32,12 +39,12 @@ export async function cmdAccountBalance(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(res.body.toString("utf-8"))
+  const $ = cheerio.load(requireHtml(res))
   const cells = $(".dps-content")
     .map((_i, el) => $(el).text().trim())
     .get()
 
-  if (cells.length === 0) {
+  if (cells.length < 16) {
     return null
   }
 
@@ -120,7 +127,7 @@ export async function cmdAccountTransactions(
       res.body.length === 0 ||
       !(disposition || contentType.includes(expectedContentType))
     ) {
-      throw new Error(
+      throw bankResponseError(
         `NLB did not return a valid ${format.toUpperCase()} file. Try --format tab, csv, or json.`
       )
     }
@@ -144,7 +151,7 @@ export async function cmdAccountTransactions(
 
   // Text output formats (tab, csv, json)
   const res = await nlbPost("/Retail/Transactions", cookie, data)
-  const $ = cheerio.load(res.body.toString("utf-8"))
+  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
   const headers = [
     "date",
     "recipient",
@@ -194,7 +201,7 @@ export async function cmdAccountReservations(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(res.body.toString("utf-8"))
+  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
   const rows: string[][] = []
   $("tbody > tr").each((_i, tr) => {
     const tds = $(tr).find("td")

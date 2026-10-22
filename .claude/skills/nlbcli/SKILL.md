@@ -27,6 +27,8 @@ For multiple logins, put `--profile <profile>` before the command, for example `
 
 If a command fails due to an expired session (HTTP 302 redirect), ask the user to run `nlbcli --profile <profile> login` again using the selected profile.
 
+For scripts or agent data reads, add the global `--non-interactive` option, for example `nlbcli --profile work --non-interactive accounts balance <id> --format json`. This uses only that profile's saved session and never prompts or waits for push approval. A missing or expired session exits with code `3` and prints the profile's login command to stderr; run that login interactively before retrying. Other exit codes are `2` for invalid arguments, `4` for network failures/timeouts, `5` for invalid bank responses, and `1` for unexpected local/runtime errors. Progress and errors go to stderr; data goes to stdout. Do not combine `--non-interactive` with `login` or `--wizard`.
+
 ## Available commands
 
 ```
