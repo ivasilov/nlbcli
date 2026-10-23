@@ -104,6 +104,18 @@ nlbcli accounts transactions <ACCOUNT_ID> \
 | `nlbcli cards balance <CARD_ID>` | Show card balance and details |
 | `nlbcli cards transactions <CARD_ID>` | List card transactions |
 
+Card transactions accept the same date bounds and export options as account transactions:
+
+```bash
+nlbcli --profile work --non-interactive cards transactions <CARD_ID> \
+  --start 01.01.2024 \
+  --end 31.01.2024 \
+  --format csv \
+  --output ./card-transactions.csv
+```
+
+Dates must be valid `dd.mm.yyyy` values and the start must be on or before the end. Omitted bounds default to 30 days ago and today. CSV, JSON, and tab exports collect all pages; XLS requests the bank's report for the specified range.
+
 ### Payments
 
 > [!CAUTION]
@@ -146,7 +158,9 @@ is supplied. For external or unknown destination accounts, pass both
 
 ### Output formats
 
-Account balances support `--format tab` (default), `csv`, or `json`. Account transactions additionally support `xls` and `pdf`. File exports are saved to a `downloads/` directory when NLB returns a valid report file; the saved path is reported on stderr.
+Account balances support `--format tab` (default), `csv`, or `json`. Both transaction commands additionally support `xls`; account transactions also support `pdf`. Without `--output`, text formats print to stdout and report files are saved under `downloads/`, with the saved path reported on stderr.
+
+Use `--output <path>` with either transaction command to save any supported format to an exact file path; its parent directory must already exist. Empty JSON exports contain `[]`, and empty CSV files contain their headers. Invalid report responses and failed or expired requests produce errors without writing partial results.
 
 Run `nlbcli --help` for all available commands and options.
 

@@ -1,13 +1,11 @@
-// biome-ignore lint/performance/noNamespaceImport: Cheerio exposes its parser through the module namespace.
-import * as cheerio from "cheerio"
-import { dateFmt } from "../constants"
+import { load } from "cheerio"
+import { nlbGet, nlbPost, requireBalancesPage, requireHtml } from "../http"
 import {
-  nlbGet,
-  nlbPost,
-  requireBalancesPage,
-  requireHtml,
-  TABLE_HTML,
-} from "../http"
+  cardTransactionFormats,
+  fetchTransactions,
+  type TransactionsResult,
+  validateTransactionOptions,
+} from "./transactions"
 
 export async function cmdListCards(cookie: string): Promise<string[]> {
   const res = await nlbGet("/Home/Balances?bankid=tutunska.banka@ibank", cookie)
@@ -34,7 +32,7 @@ export async function cmdCardBalance(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(requireHtml(res))
+  const $ = load(requireHtml(res))
   const cells = $(
     "#main_CmsAccountBalanceForm .col-lg-12 > .col-lg-8 > .row > div"
   )
@@ -60,42 +58,47 @@ export async function cmdCardBalance(
 
 export async function cmdCardTransactions(
   cookie: string,
-  cardId: string
-): Promise<string[][]> {
-  const today = new Date()
-  const monthAgo = new Date(today)
-  monthAgo.setDate(monthAgo.getDate() - 30)
-
-  const res = await nlbPost("/Cms/Transactions", cookie, {
-    ignoreSettingContextAccount: "False",
-    SaveFilter: "False",
-    RemoveFilter: "False",
-    PageNumber: "",
-    PageSize: "20",
-    DetailsView: "0",
-    SelectedItem: "",
-    PageId: "",
-    IsWidget: "False",
-    AccountID: cardId,
-    DateFrom: dateFmt(monthAgo),
-    DateTo: dateFmt(today),
-    CardNumber: "",
-    AmountCondition: "",
-    AmountFrom: "",
-    Amount: "",
-    AmountTo: "",
-    TrnDescription: "",
-    SortColumn: "Date",
-    SortDirection: "DESC",
-    Report: "",
-    "X-Requested-With": "XMLHttpRequest",
-  })
-
-  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
-  const rows: string[][] = []
-  $("tbody > tr").each((_i, tr) => {
-    const tds = $(tr).find("td")
-    rows.push(tds.map((_j, td) => $(td).text().trim()).get())
-  })
-  return rows
+  cardId: string,
+  startDate: string,
+  endDate: string,
+  format: string,
+  output?: string
+): Promise<TransactionsResult> {
+  validateTransactionOptions(
+    startDate,
+    endDate,
+    format,
+    output,
+    cardTransactionFormats
+  )
+  return await fetchTransactions(
+    cookie,
+    "/Cms/Transactions",
+    {
+      ignoreSettingContextAccount: "False",
+      SaveFilter: "False",
+      RemoveFilter: "False",
+      PageNumber: "",
+      PageSize: "20",
+      DetailsView: "0",
+      SelectedItem: "",
+      PageId: "",
+      IsWidget: "False",
+      AccountID: cardId,
+      DateFrom: startDate,
+      DateTo: endDate,
+      CardNumber: "",
+      AmountCondition: "",
+      AmountFrom: "",
+      Amount: "",
+      AmountTo: "",
+      TrnDescription: "",
+      SortColumn: "Date",
+      SortDirection: "DESC",
+      Report: "",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    format,
+    output
+  )
 }

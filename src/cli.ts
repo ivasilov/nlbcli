@@ -22,14 +22,20 @@ import {
   type PaymentType,
   PaymentValidationError,
 } from "./commands/payments"
-import { DEFAULT_PROFILE, dateFmt } from "./constants"
+import {
+  cardTransactionFormats,
+  printTransactionsResult,
+  transactionDates,
+  validateTransactionOptions,
+} from "./commands/transactions"
+import { DEFAULT_PROFILE } from "./constants"
 import {
   authenticationError,
   bankResponseError,
   CliError,
   EXIT_CODES,
 } from "./errors"
-import { printCsv, printJson, printTab } from "./formatters"
+import { printCsv, printJson } from "./formatters"
 import { loadState, validateProfile } from "./state"
 
 const rootCommand = Command.make("nlbcli", {
@@ -49,10 +55,14 @@ function attempt<A>(run: () => Promise<A>) {
   return Effect.tryPromise({ try: run, catch: (error) => error })
 }
 
-function dataCommand<A>(run: (cookie: string) => Promise<A>) {
+function dataCommand<A>(
+  run: (cookie: string) => Promise<A>,
+  validate?: () => void
+) {
   return Effect.gen(function* () {
     const { profile, nonInteractive } = yield* rootCommand
     return yield* attempt(async () => {
+      validate?.()
       const cookie = await getSession(profile, undefined, { nonInteractive })
       try {
         return await run(cookie)
@@ -90,6 +100,11 @@ const transactionsFormatOption = Options.choice("format", [
 ]).pipe(
   Options.withDescription("Output format (tab|csv|json|xls|pdf)"),
   Options.withDefault("tab")
+)
+
+const outputOption = Options.text("output").pipe(
+  Options.withDescription("Save export to this file path"),
+  Options.optional
 )
 
 const bankDate = /^(\d{2})\.(\d{2})\.(\d{4})$/
@@ -360,38 +375,32 @@ const accountsTransactionsCommand = Command.make(
     format: transactionsFormatOption,
     type: typeOption,
     name: nameOption,
+    output: outputOption,
   },
-  ({ id, start, end, format, type, name }) =>
-    dataCommand(async (cookie) => {
-      const today = new Date()
-      const monthAgo = new Date(today)
-      monthAgo.setDate(monthAgo.getDate() - 30)
-      const result = await cmdAccountTransactions(
-        cookie,
-        id,
-        Option.getOrElse(start, () => dateFmt(monthAgo)),
-        Option.getOrElse(end, () => dateFmt(today)),
-        format,
-        type,
-        name
-      )
-      if (!result) {
-        if (format === "json") {
-          printJson([])
-        }
-        console.error("No transactions found.")
-        return
-      }
-      if (result.kind === "file") {
-        console.error(`SAVED: ${result.path} (${result.bytes} bytes)`)
-      } else if (format === "json") {
-        printJson(result.jsonRows)
-      } else if (format === "csv") {
-        printCsv(result.rows, result.headers)
-      } else {
-        printTab(result.rows)
-      }
-    })
+  ({ id, start, end, format, type, name, output }) => {
+    const dates = transactionDates(
+      Option.getOrUndefined(start),
+      Option.getOrUndefined(end)
+    )
+    const outputPath = Option.getOrUndefined(output)
+    return dataCommand(
+      async (cookie) => {
+        const result = await cmdAccountTransactions(
+          cookie,
+          id,
+          dates.start,
+          dates.end,
+          format,
+          type,
+          name,
+          outputPath
+        )
+        printTransactionsResult(result, format)
+      },
+      () =>
+        validateTransactionOptions(dates.start, dates.end, format, outputPath)
+    )
+  }
 ).pipe(Command.withDescription("List account transactions"))
 
 const accountsReservationsCommand = Command.make(
@@ -445,14 +454,44 @@ const cardsBalanceCommand = Command.make(
 
 const cardsTransactionsCommand = Command.make(
   "transactions",
-  { id: cardIdArg },
-  ({ id }) =>
-    dataCommand(async (cookie) => {
-      const rows = await cmdCardTransactions(cookie, id)
-      for (const r of rows) {
-        console.log(r.join("\t"))
-      }
-    })
+  {
+    id: cardIdArg,
+    start: startOption,
+    end: endOption,
+    format: Options.choice("format", ["tab", "csv", "json", "xls"]).pipe(
+      Options.withDescription("Output format (tab|csv|json|xls)"),
+      Options.withDefault("tab")
+    ),
+    output: outputOption,
+  },
+  ({ id, start, end, format, output }) => {
+    const dates = transactionDates(
+      Option.getOrUndefined(start),
+      Option.getOrUndefined(end)
+    )
+    const outputPath = Option.getOrUndefined(output)
+    return dataCommand(
+      async (cookie) => {
+        const result = await cmdCardTransactions(
+          cookie,
+          id,
+          dates.start,
+          dates.end,
+          format,
+          outputPath
+        )
+        printTransactionsResult(result, format)
+      },
+      () =>
+        validateTransactionOptions(
+          dates.start,
+          dates.end,
+          format,
+          outputPath,
+          cardTransactionFormats
+        )
+    )
+  }
 ).pipe(Command.withDescription("List card transactions"))
 
 const cardsCommand = Command.make("cards").pipe(
