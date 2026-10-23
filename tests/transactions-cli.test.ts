@@ -11,10 +11,10 @@ import {
   expect,
   test,
 } from "vitest"
-import { read, utils } from "xlsx"
 import {
   headers,
   jsonRows,
+  readTransactionExport,
   rows,
   transactionHtml,
   transactionXls,
@@ -118,20 +118,9 @@ test.each([
     "exact destination.result",
   ])
   const contents = fs.readFileSync(path.join(directory, output))
-  if (format === "json") {
-    expect(JSON.parse(contents.toString("utf-8"))).toEqual(jsonRows)
-  } else {
-    const workbook =
-      format === "csv"
-        ? read(contents.toString("utf-8"), { type: "string", raw: true })
-        : read(contents, { type: "buffer", raw: true })
-    expect(
-      utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
-        header: 1,
-        raw: true,
-      })
-    ).toEqual([headers, ...rows])
-  }
+  expect(readTransactionExport(format, contents)).toEqual(
+    format === "json" ? jsonRows : [headers, ...rows]
+  )
 })
 
 test.each([

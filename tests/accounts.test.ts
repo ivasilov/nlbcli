@@ -2,11 +2,11 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { read, utils } from "xlsx"
 import { cmdAccountTransactions } from "../src/commands/accounts"
 import {
   headers,
   jsonRows,
+  readTransactionExport,
   rows,
   transactionHtml,
   transactionXls,
@@ -45,20 +45,6 @@ function mockResponse(body: BodyInit | null, init?: ResponseInit) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, init)))
 }
 
-function readExport(format: string, contents: Buffer) {
-  if (format === "json") {
-    return JSON.parse(contents.toString("utf-8"))
-  }
-  const workbook =
-    format === "csv"
-      ? read(contents.toString("utf-8"), { type: "string", raw: true })
-      : read(contents, { type: "buffer", raw: true })
-  return utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
-    header: 1,
-    raw: true,
-  })
-}
-
 describe("cmdAccountTransactions", () => {
   test.each(
     formats
@@ -84,7 +70,7 @@ describe("cmdAccountTransactions", () => {
       bytes: fs.statSync(output).size,
     })
     expect(fs.readdirSync(directory)).toEqual([path.basename(output)])
-    expect(readExport(format, fs.readFileSync(output))).toEqual(
+    expect(readTransactionExport(format, fs.readFileSync(output))).toEqual(
       format === "json" ? jsonRows : [headers, ...rows]
     )
     const request = vi.mocked(fetch).mock.calls[0][1]
@@ -105,10 +91,9 @@ describe("cmdAccountTransactions", () => {
         expect(path.dirname(String(temporary))).toBe(directory)
         expect(temporary).not.toBe(destination)
         expect(fs.readFileSync(output, "utf-8")).toBe("previous export")
-        expect(readExport("xls", fs.readFileSync(temporary))).toEqual([
-          headers,
-          ...rows,
-        ])
+        expect(
+          readTransactionExport("xls", fs.readFileSync(temporary))
+        ).toEqual([headers, ...rows])
         rename(temporary, destination)
       })
 
@@ -251,6 +236,47 @@ describe("cmdAccountTransactions", () => {
 
     expect(fs.readFileSync(output, "utf-8")).toBe("previous export")
     expect(fs.readdirSync(directory)).toEqual(["export.xls"])
+  })
+
+  test("rejects a missing binary XLS EOF even when its cells can still be read", async () => {
+    const damaged = Buffer.from(xls)
+    const eof = damaged.lastIndexOf(Buffer.from([10, 0, 0, 0]))
+    expect(eof).toBeGreaterThan(0)
+    damaged.writeUInt16LE(1, eof)
+    expect(readTransactionExport("xls", damaged)).toEqual([headers, ...rows])
+    const output = path.join(directory, "export.xls")
+    fs.writeFileSync(output, "previous export")
+    mockResponse(damaged, {
+      headers: { "content-type": "application/vnd.ms-excel" },
+    })
+
+    await expect(exportTransactions("xls", output)).rejects.toThrow(
+      "valid XLS file"
+    )
+
+    expect(fs.readFileSync(output, "utf-8")).toBe("previous export")
+    expect(fs.readdirSync(directory)).toEqual(["export.xls"])
+  })
+
+  test("rejects an XLS response truncated at a complete sector boundary", async () => {
+    const output = path.join(directory, "export.xls")
+    mockResponse(xls.subarray(0, -512))
+
+    await expect(exportTransactions("xls", output)).rejects.toThrow(
+      "valid XLS file"
+    )
+
+    expect(fs.readdirSync(directory)).toEqual([])
+  })
+
+  test("rejects SpreadsheetML without a worksheet", async () => {
+    mockResponse(
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"></Workbook>'
+    )
+    await expect(
+      exportTransactions("xls", path.join(directory, "export.xls"))
+    ).rejects.toThrow("valid XLS file")
+    expect(fs.readdirSync(directory)).toEqual([])
   })
 
   test("cleans up when the atomic rename fails", async () => {

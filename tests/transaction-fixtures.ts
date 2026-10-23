@@ -1,4 +1,6 @@
-import { utils, write } from "xlsx"
+import fs from "node:fs"
+import { parse } from "csv-parse/sync"
+import { readXls } from "xls-reader"
 
 export const headers = [
   "date",
@@ -34,11 +36,17 @@ export function transactionHtml(data = rows): string {
 }
 
 export function transactionXls(): Buffer {
-  const workbook = utils.book_new()
-  utils.book_append_sheet(
-    workbook,
-    utils.aoa_to_sheet([headers, ...rows]),
-    "Transactions"
+  return fs.readFileSync(
+    new URL("./fixtures/accounts/report.xls", import.meta.url)
   )
-  return write(workbook, { type: "buffer", bookType: "biff8" })
+}
+
+export function readTransactionExport(format: string, contents: Buffer) {
+  if (format === "json") {
+    return JSON.parse(contents.toString("utf-8"))
+  }
+  if (format === "csv") {
+    return parse(contents)
+  }
+  return readXls(contents).sheets[0].rows
 }
