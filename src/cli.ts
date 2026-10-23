@@ -2,7 +2,7 @@ import { Args, Command, HelpDoc, Options, ValidationError } from "@effect/cli"
 import { NodeContext } from "@effect/platform-node"
 import { Cause, Effect, Exit, Option } from "effect"
 import packageJson from "../package.json"
-import { cmdLogin, getSession, prompt } from "./auth"
+import { cmdLogin, getSession, openAuthenticatedPath, prompt } from "./auth"
 import {
   cmdAccountBalance,
   cmdAccountReservations,
@@ -14,6 +14,14 @@ import {
   cmdCardTransactions,
   cmdListCards,
 } from "./commands/cards"
+import {
+  defaultValueDate,
+  executePayment,
+  type PaymentMode,
+  type PaymentRequest,
+  type PaymentType,
+  PaymentValidationError,
+} from "./commands/payments"
 import { DEFAULT_PROFILE, dateFmt } from "./constants"
 import {
   authenticationError,
@@ -131,6 +139,157 @@ const nameOption = Options.text("name").pipe(
 // Shared args
 const accountIdArg = Args.text({ name: "account-id" })
 const cardIdArg = Args.text({ name: "card-id" })
+
+function optionalText(name: string, description: string) {
+  return Options.text(name).pipe(
+    Options.withDescription(description),
+    Options.optional
+  )
+}
+
+const paymentTypeArg = Args.choice<PaymentType>(
+  [
+    ["pp30", "pp30"],
+    ["pp50", "pp50"],
+    ["pp53", "pp53"],
+  ],
+  { name: "type" }
+)
+
+function optionText(value: Option.Option<string>): string | undefined {
+  return Option.isSome(value) ? value.value : undefined
+}
+
+function requiredPaymentOption(
+  value: Option.Option<string>,
+  name: string,
+  type: PaymentType
+): string {
+  if (Option.isSome(value) && value.value.trim()) {
+    return value.value
+  }
+  throw new CliError(
+    EXIT_CODES.arguments,
+    `--${name} is required for ${type.toUpperCase()}.`
+  )
+}
+
+function makePaymentParameters() {
+  return {
+    type: paymentTypeArg,
+    source: Options.text("source").pipe(
+      Options.withDescription("Source account ID")
+    ),
+    date: dateOption("date").pipe(
+      Options.withDescription("Value date (dd.mm.yyyy; defaults to today)")
+    ),
+    urgent: Options.boolean("urgent").pipe(
+      Options.withDescription("Send through MIPS")
+    ),
+    destination: optionalText("destination", "Recipient payment account"),
+    amount: optionalText("amount", "Payment amount in MKD"),
+    purposeCode: optionalText("purpose-code", "PP30 payment purpose code"),
+    purpose: optionalText("purpose", "Payment purpose description"),
+    recipientName: optionalText(
+      "recipient-name",
+      "Recipient name for an external or unknown account"
+    ),
+    recipientAddress: optionalText(
+      "recipient-address",
+      "Recipient address for an external or unknown account"
+    ),
+    debitReference: optionalText(
+      "debit-reference",
+      "Ordering-party reference number"
+    ),
+    creditReference: optionalText(
+      "credit-reference",
+      "Recipient reference number"
+    ),
+    payeeAccount: optionalText("payee-account", "PP50 payee account"),
+    budgetaryAccount: optionalText(
+      "budgetary-account",
+      "PP50 budgetary user account"
+    ),
+    incomeCodeAndProgram: optionalText(
+      "income-code-program",
+      "PP50 income code and program"
+    ),
+    folio: optionalText("folio", "PP53 folio number"),
+  }
+}
+
+interface PaymentCliParameters {
+  amount: Option.Option<string>
+  budgetaryAccount: Option.Option<string>
+  creditReference: Option.Option<string>
+  date: Option.Option<string>
+  debitReference: Option.Option<string>
+  destination: Option.Option<string>
+  folio: Option.Option<string>
+  incomeCodeAndProgram: Option.Option<string>
+  payeeAccount: Option.Option<string>
+  purpose: Option.Option<string>
+  purposeCode: Option.Option<string>
+  recipientAddress: Option.Option<string>
+  recipientName: Option.Option<string>
+  source: string
+  type: PaymentType
+  urgent: boolean
+}
+
+function paymentRequestFromCli(options: PaymentCliParameters): PaymentRequest {
+  const common = {
+    sourceAccount: options.source,
+    urgency: options.urgent,
+    valueDate: optionText(options.date) ?? defaultValueDate(),
+  }
+
+  if (options.type === "pp53") {
+    return {
+      ...common,
+      type: options.type,
+      folioNumber: requiredPaymentOption(options.folio, "folio", options.type),
+    }
+  }
+
+  const destinationAccount = requiredPaymentOption(
+    options.destination,
+    "destination",
+    options.type
+  )
+  const amount = requiredPaymentOption(options.amount, "amount", options.type)
+  const sharedRecipient = {
+    ...common,
+    amount,
+    debitReference: optionText(options.debitReference),
+    destinationAccount,
+    purposeDescription: optionText(options.purpose),
+    recipientAddress: optionText(options.recipientAddress),
+    recipientName: optionText(options.recipientName),
+  }
+
+  if (options.type === "pp30") {
+    return {
+      ...sharedRecipient,
+      type: options.type,
+      creditReference: optionText(options.creditReference),
+      purposeCode: requiredPaymentOption(
+        options.purposeCode,
+        "purpose-code",
+        options.type
+      ),
+    }
+  }
+
+  return {
+    ...sharedRecipient,
+    type: options.type,
+    budgetaryAccount: optionText(options.budgetaryAccount),
+    incomeCodeAndProgram: optionText(options.incomeCodeAndProgram),
+    payeeAccount: optionText(options.payeeAccount),
+  }
+}
 
 // --- Login command ---
 
@@ -305,11 +464,79 @@ const cardsCommand = Command.make("cards").pipe(
   ])
 )
 
+// --- Payment commands ---
+
+function makePaymentCommand(mode: PaymentMode) {
+  return Command.make(mode, makePaymentParameters(), (parameters) =>
+    Effect.gen(function* () {
+      const { profile, nonInteractive } = yield* rootCommand
+      if (mode === "send" && nonInteractive) {
+        return yield* Effect.fail(
+          new CliError(
+            EXIT_CODES.arguments,
+            "Sending a payment requires an interactive terminal and cannot use --non-interactive."
+          )
+        )
+      }
+
+      return yield* attempt(async () => {
+        let request: PaymentRequest
+        try {
+          request = paymentRequestFromCli(parameters)
+        } catch (error) {
+          if (error instanceof PaymentValidationError) {
+            throw new CliError(EXIT_CODES.arguments, error.message)
+          }
+          throw error
+        }
+
+        const result = await executePayment(request, mode, {
+          openSession: (urlPath) =>
+            openAuthenticatedPath(urlPath, { nonInteractive, profile }),
+        })
+        console.log(`STATUS: ${result.status}`)
+        if (result.orderId) {
+          console.log(`ORDER: ${result.orderId}`)
+        }
+        console.log(result.message)
+        if (
+          ["authorization-timeout", "rejected", "unknown"].includes(
+            result.status
+          )
+        ) {
+          throw bankResponseError(result.message)
+        }
+      })
+    })
+  ).pipe(
+    Command.withDescription(
+      mode === "create"
+        ? "EXPERIMENTAL: Validate and save a payment order"
+        : "EXPERIMENTAL: Review, sign, and submit a payment order"
+    )
+  )
+}
+
+const paymentsCommand = Command.make("payments").pipe(
+  Command.withDescription(
+    "EXPERIMENTAL: Create and send PP30, PP50, and PP53 payments"
+  ),
+  Command.withSubcommands([
+    makePaymentCommand("create"),
+    makePaymentCommand("send"),
+  ])
+)
+
 // --- Root command ---
 
 export const command = rootCommand.pipe(
   Command.withDescription("NLB Tutunska CLI client"),
-  Command.withSubcommands([loginCommand, accountsCommand, cardsCommand])
+  Command.withSubcommands([
+    loginCommand,
+    accountsCommand,
+    cardsCommand,
+    paymentsCommand,
+  ])
 )
 
 // --- Run ---

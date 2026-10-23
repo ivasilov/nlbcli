@@ -17,11 +17,39 @@ export const TABLE_HTML = /<table\b/i
 // authenticated navigation link as well as the IDs that the list commands use.
 const balancesPage =
   /[0-9]{3}-[0-9]{10}-[0-9]{2}[A-Z]{2,3}|[0-9]{8,15}\/[0-9]{4}|\b(?:id|class)\s*=\s*["'][^"']*balance|\/Account\/(?:LogOff|LogOut)/i
+const cookieSeparator = /;\s*/
 
 export interface HttpResponse {
   body: Buffer
   headers: Record<string, string | string[] | undefined>
+  setCookies: string[]
   status: number
+}
+
+export function mergeCookieHeader(
+  existing: string,
+  newSetCookies: readonly string[]
+): string {
+  const jar = new Map<string, string>()
+
+  for (const pair of existing.split(cookieSeparator)) {
+    const separator = pair.indexOf("=")
+    if (separator > 0) {
+      jar.set(pair.slice(0, separator).trim(), pair.slice(separator + 1))
+    }
+  }
+
+  for (const setCookie of newSetCookies) {
+    const pair = setCookie.split(";", 1)[0]
+    const separator = pair.indexOf("=")
+    if (separator > 0) {
+      jar.set(pair.slice(0, separator).trim(), pair.slice(separator + 1))
+    }
+  }
+
+  return [...jar.entries()]
+    .map(([name, value]) => `${name}=${value}`)
+    .join("; ")
 }
 
 export async function bankFetch(
@@ -84,10 +112,17 @@ function validateStatus(res: Pick<HttpResponse, "status" | "headers">): void {
 }
 
 function validateResponse(res: HttpResponse): void {
-  const html = res.body.toString("utf-8")
-  if (loginForm.test(html) || loginJson.test(html)) {
+  if (isAuthenticationResponse(res)) {
     throw authenticationError()
   }
+}
+
+export function isAuthenticationResponse(res: HttpResponse): boolean {
+  if (isLoginRedirect(res) || res.status === 401 || res.status === 403) {
+    return true
+  }
+  const html = res.body.toString("utf-8")
+  return loginForm.test(html) || loginJson.test(html)
 }
 
 export function requireHtml(res: HttpResponse, selector?: RegExp): string {
@@ -128,6 +163,7 @@ async function httpRequest(
   res.headers.forEach((value, key) => {
     resHeaders[key] = value
   })
+  const setCookies = res.headers.getSetCookie?.() ?? []
   // Redirects already identify expired sessions; do not wait for their bodies.
   validateStatus({ status: res.status, headers: resHeaders })
   let bodyBuffer: Buffer
@@ -142,10 +178,71 @@ async function httpRequest(
   const response = {
     status: res.status,
     headers: resHeaders,
+    setCookies,
     body: bodyBuffer,
   }
   validateResponse(response)
   return response
+}
+
+export class NlbHttpClient {
+  cookieHeader: string
+
+  constructor(cookieHeader: string) {
+    this.cookieHeader = cookieHeader
+  }
+
+  private async request(
+    method: "GET" | "POST",
+    urlPath: string,
+    body?: string
+  ): Promise<HttpResponse> {
+    const headers: Record<string, string> = {
+      Cookie: this.cookieHeader,
+      "X-Requested-With": "XMLHttpRequest",
+    }
+    if (method === "POST") {
+      headers["Content-Type"] = "application/x-www-form-urlencoded"
+    }
+
+    const response = await bankFetch(new URL(urlPath, BASE_URL), {
+      method,
+      headers,
+      body,
+      redirect: "manual",
+    })
+    const responseHeaders: Record<string, string | string[] | undefined> = {}
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value
+    })
+    const setCookies = response.headers.getSetCookie?.() ?? []
+    this.cookieHeader = mergeCookieHeader(this.cookieHeader, setCookies)
+
+    let responseBody: Buffer
+    try {
+      responseBody = Buffer.from(await response.arrayBuffer())
+    } catch {
+      throw new CliError(
+        EXIT_CODES.network,
+        "Unable to read the response from NLB. Try again."
+      )
+    }
+
+    return {
+      body: responseBody,
+      headers: responseHeaders,
+      setCookies,
+      status: response.status,
+    }
+  }
+
+  get(urlPath: string): Promise<HttpResponse> {
+    return this.request("GET", urlPath)
+  }
+
+  post(urlPath: string, data: Record<string, string>): Promise<HttpResponse> {
+    return this.request("POST", urlPath, new URLSearchParams(data).toString())
+  }
 }
 
 export function isLoginRedirect(

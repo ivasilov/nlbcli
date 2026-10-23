@@ -1,12 +1,21 @@
 import readline from "node:readline"
-import { BASE_URL } from "./constants"
+import { BASE_URL, DEFAULT_PROFILE } from "./constants"
 import {
   authenticationError,
   bankResponseError,
   CliError,
   EXIT_CODES,
 } from "./errors"
-import { bankFetch, nlbGet, readBankJson, requireBalancesPage } from "./http"
+import {
+  bankFetch,
+  type HttpResponse,
+  isAuthenticationResponse,
+  mergeCookieHeader,
+  NlbHttpClient,
+  nlbGet,
+  readBankJson,
+  requireBalancesPage,
+} from "./http"
 import {
   getSessionFile,
   loadState,
@@ -18,30 +27,8 @@ function parseSetCookies(res: Response): string[] {
   return res.headers.getSetCookie?.() ?? []
 }
 
-function mergeCookies(existing: string, newSetCookies: string[]): string {
-  const jar: Record<string, string> = {}
-  if (existing) {
-    for (const pair of existing.split("; ")) {
-      const [name, ...rest] = pair.split("=")
-      if (name) {
-        jar[name.trim()] = rest.join("=")
-      }
-    }
-  }
-  for (const sc of newSetCookies) {
-    const nameValue = sc.split(";")[0]
-    const [name, ...rest] = nameValue.split("=")
-    if (name) {
-      jar[name.trim()] = rest.join("=")
-    }
-  }
-  return Object.entries(jar)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("; ")
-}
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The push login protocol has several sequential authentication steps.
-async function loginWithPush(
+export async function loginWithPush(
   profile: string,
   username: string
 ): Promise<string> {
@@ -53,7 +40,7 @@ async function loginWithPush(
   const loginPageRes = await bankFetch(`${BASE_URL}/Account/Login`, {
     redirect: "manual",
   })
-  cookies = mergeCookies(cookies, parseSetCookies(loginPageRes))
+  cookies = mergeCookieHeader(cookies, parseSetCookies(loginPageRes))
 
   // Follow redirect if needed
   if (loginPageRes.status >= 300 && loginPageRes.status < 400) {
@@ -66,7 +53,7 @@ async function loginWithPush(
         headers: { Cookie: cookies },
         redirect: "manual",
       })
-      cookies = mergeCookies(cookies, parseSetCookies(redirectRes))
+      cookies = mergeCookieHeader(cookies, parseSetCookies(redirectRes))
     }
   }
 
@@ -82,7 +69,7 @@ async function loginWithPush(
     body: new URLSearchParams({ UserName: username }).toString(),
     redirect: "manual",
   })
-  cookies = mergeCookies(cookies, parseSetCookies(pushRes))
+  cookies = mergeCookieHeader(cookies, parseSetCookies(pushRes))
 
   const pushData = await readBankJson(pushRes)
   if (
@@ -124,7 +111,7 @@ async function loginWithPush(
         redirect: "manual",
       }
     )
-    cookies = mergeCookies(cookies, parseSetCookies(statusRes))
+    cookies = mergeCookieHeader(cookies, parseSetCookies(statusRes))
 
     const statusData = await readBankJson(statusRes)
     if (typeof statusData.Success !== "boolean") {
@@ -157,7 +144,7 @@ async function loginWithPush(
           redirect: "manual",
         }
       )
-      cookies = mergeCookies(cookies, parseSetCookies(loginRes))
+      cookies = mergeCookieHeader(cookies, parseSetCookies(loginRes))
 
       const loginData = await readBankJson(loginRes)
       if (
@@ -187,7 +174,7 @@ async function loginWithPush(
           headers: { Cookie: cookies },
           redirect: "manual",
         })
-        cookies = mergeCookies(cookies, parseSetCookies(finalRes))
+        cookies = mergeCookieHeader(cookies, parseSetCookies(finalRes))
       }
 
       console.error("Login successful!")
@@ -201,6 +188,75 @@ async function loginWithPush(
     EXIT_CODES.authentication,
     "Timed out waiting for push approval."
   )
+}
+
+export interface AuthenticatedPath {
+  client: NlbHttpClient
+  response: HttpResponse
+}
+
+export interface AuthenticatedPathOptions {
+  load?: typeof loadState
+  login?: typeof loginWithPush
+  nonInteractive?: boolean
+  persist?: typeof saveCookies
+  profile?: string
+}
+
+async function tryTarget(
+  client: NlbHttpClient,
+  urlPath: string
+): Promise<HttpResponse | null> {
+  try {
+    const response = await client.get(urlPath)
+    return isAuthenticationResponse(response) ? null : response
+  } catch (error) {
+    if (
+      error instanceof CliError &&
+      error.exitCode === EXIT_CODES.authentication
+    ) {
+      return null
+    }
+    throw error
+  }
+}
+
+/**
+ * Uses the requested payment form as the session check so payment commands do
+ * not fetch the balances page or any unrelated payment form.
+ */
+export async function openAuthenticatedPath(
+  urlPath: string,
+  options: AuthenticatedPathOptions = {}
+): Promise<AuthenticatedPath> {
+  const profile = options.profile ?? DEFAULT_PROFILE
+  const load = options.load ?? loadState
+  const login = options.login ?? loginWithPush
+  const persist = options.persist ?? saveCookies
+  const state = load(profile)
+  if (!state) {
+    throw authenticationError(profile)
+  }
+
+  let client = new NlbHttpClient(state.cookie)
+  let response = await tryTarget(client, urlPath)
+  if (response) {
+    console.error("Using saved session.")
+  } else {
+    if (options.nonInteractive || !state.username) {
+      throw authenticationError(profile, state.username)
+    }
+    console.error("Session expired, re-authenticating...")
+    client = new NlbHttpClient(await login(profile, state.username))
+    response = await tryTarget(client, urlPath)
+  }
+
+  if (!response) {
+    throw authenticationError(profile, state.username)
+  }
+
+  persist(profile, client.cookieHeader, state.username)
+  return { client, response }
 }
 
 export async function getSession(
