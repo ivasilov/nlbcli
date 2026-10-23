@@ -1,0 +1,10 @@
+{
+  "xls": {
+    "content-type": "application/vnd.ms-excel",
+    "content-disposition": "attachment; filename=\"redacted.xls\""
+  },
+  "pdf": {
+    "content-type": "application/pdf",
+    "content-disposition": "attachment; filename=\"redacted.pdf\""
+  }
+}

@@ -6,6 +6,7 @@ import { cmdAccountTransactions } from "../src/commands/accounts"
 import {
   headers,
   jsonRows,
+  normalizedRows,
   readTransactionExport,
   rows,
   transactionHtml,
@@ -71,7 +72,9 @@ describe("cmdAccountTransactions", () => {
     })
     expect(fs.readdirSync(directory)).toEqual([path.basename(output)])
     expect(readTransactionExport(format, fs.readFileSync(output))).toEqual(
-      format === "json" ? jsonRows : [headers, ...rows]
+      format === "json"
+        ? jsonRows
+        : [headers, ...(format === "csv" ? normalizedRows : rows)]
     )
     const request = vi.mocked(fetch).mock.calls[0][1]
     expect(new URLSearchParams(String(request?.body)).get("Report")).toBe(
@@ -322,7 +325,8 @@ describe("cmdAccountTransactions", () => {
     await expect(exportTransactions(format)).resolves.toEqual({
       kind: "data",
       headers,
-      rows,
+      rows: normalizedRows,
+      tabRows: rows,
       jsonRows,
     })
   })
