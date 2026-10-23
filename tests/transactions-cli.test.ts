@@ -168,13 +168,17 @@ test.each([
   }
 })
 
-test("bundled version matches package metadata outside the repository", () => {
-  const result = spawnSync(process.execPath, [cli, "--version"], {
+test.each([
+  "--version",
+  "-v",
+])("bundled %s matches package metadata outside the repository", (flag) => {
+  const result = spawnSync(process.execPath, [cli, flag], {
     cwd: directory,
     encoding: "utf-8",
   })
   expect(result.status, result.stderr).toBe(0)
   expect(result.stdout.trim()).toBe(packageJson.version)
+  expect(result.stderr).toBe("")
 })
 
 test("JSON export is identical across host timezones", () => {

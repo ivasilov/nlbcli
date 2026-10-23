@@ -176,6 +176,8 @@ Read the reported `STATUS`, order ID when present, and message. `draft-created` 
 
 Run `nlbcli --help` for the command tree or append `--help` to a command for its installed options, for example `nlbcli cards transactions --help` or `nlbcli payments send --help`.
 
+Run `nlbcli --version` or `nlbcli -v` to print the installed version.
+
 ## How it works
 
 Built with TypeScript and [Effect](https://effect.website/) for the CLI framework. Authentication uses NLB Klik's push notification flow. Subsequent interactions use `fetch` requests with the saved session cookie; [Cheerio](https://cheerio.js.org/) parses HTML responses.
