@@ -162,6 +162,16 @@ Account balances support `--format tab` (default), `csv`, or `json`. Both transa
 
 Use `--output <path>` with either transaction command to save any supported format to an exact file path; its parent directory must already exist. Empty JSON exports contain `[]`, and empty CSV files contain their headers. Invalid report responses and failed or expired requests produce errors without writing partial results.
 
+For example:
+
+```bash
+nlbcli accounts transactions <ACCOUNT_ID> --format xls --output ./transactions.xls
+nlbcli accounts transactions <ACCOUNT_ID> --format csv --output ./transactions.csv
+nlbcli accounts transactions <ACCOUNT_ID> --format json --output ./transactions.json
+```
+
+Exports are validated in a temporary file beside the destination, then atomically replace it. Failed or incomplete downloads leave an existing destination unchanged and remove temporary files. Progress and save messages go to stderr.
+
 Run `nlbcli --help` for all available commands and options.
 
 ## How it works
