@@ -64,6 +64,7 @@ const leadingSign = /^[+-]/
 const redundantZeros = /^0+(?=\d)/
 const nonzeroDigit = /[1-9]/
 const currencyCode = /^[A-Z]{3}$/
+const bankCurrencySuffix = /\s+[A-Z]{3}$/
 
 /** Normalize bank decimal-comma and decimal-point amounts without Number. */
 export function normalizeAmount(value: string): string | null {
@@ -137,7 +138,7 @@ function normalizeField(field: string, value: string): TransactionValue {
     return normalizeDate(value)
   }
   if (["amount", "fee", "balance"].includes(field)) {
-    return normalizeAmount(value)
+    return normalizeAmount(value.trim().replace(bankCurrencySuffix, ""))
   }
   const text = value.trim()
   if (!text) {
@@ -161,6 +162,16 @@ export function parseTransactions(
   const fields =
     kind === "account" ? ACCOUNT_TRANSACTION_FIELDS : CARD_TRANSACTION_FIELDS
   const tables = $("table")
+  // NLB omits the table entirely when a query has no matching transactions.
+  if (tables.length === 0 && $(".alert.alert-info.no-data").length > 0) {
+    return {
+      kind: "data",
+      headers: [...fields],
+      rows: [],
+      tabRows: [],
+      jsonRows: [],
+    }
+  }
   const namedTables = tables.filter((_i, table) => {
     const headers = $(table).find("thead th")
     const names = headers

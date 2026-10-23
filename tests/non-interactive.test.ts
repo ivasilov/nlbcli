@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { runCli } from "../src/cli"
 import { EXIT_CODES } from "../src/errors"
 import { loadState } from "../src/state"
+import { page } from "./fixtures"
 
 vi.mock("../src/state", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/state")>()),
@@ -357,4 +358,34 @@ test("empty transaction tables produce parseable JSON", async () => {
     JSON.parse(stdout.mock.calls.map(([value]) => value).join(""))
   ).toEqual([])
   expect(stderr).toHaveBeenCalledWith("No transactions found.")
+})
+
+test.each([
+  ["tab", ""],
+  ["csv", "date,recipient,description,status,amount,fee,balance"],
+  ["json", "[]"],
+])("the bank's no-data notice succeeds for non-interactive %s transactions", async (format, expectedOutput) => {
+  fetchMock
+    .mockResolvedValueOnce(new Response(balances))
+    .mockResolvedValueOnce(
+      new Response(page("no-data-transactions.html").body.toString())
+    )
+  expect(
+    await runCli([
+      "node",
+      "nlbcli",
+      "--profile",
+      "work",
+      "--non-interactive",
+      "accounts",
+      "transactions",
+      account,
+      "--format",
+      format,
+    ])
+  ).toBe(EXIT_CODES.success)
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(stderr).toHaveBeenCalledWith("No transactions found.")
+  const output = stdout.mock.calls.map(([value]) => value).join("")
+  expect(output).toBe(expectedOutput)
 })

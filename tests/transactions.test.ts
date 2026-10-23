@@ -84,6 +84,34 @@ describe("transaction values", () => {
 })
 
 describe("transaction pages", () => {
+  test.each([
+    "MKD",
+    "EUR",
+    "USD",
+  ])("parses %s amounts from the live account layout", (currency) => {
+    const response = page("accounts/live-transactions.html")
+    response.body = Buffer.from(
+      response.body.toString().replaceAll("MKD", currency)
+    )
+    const result = parseTransactions(response, "account")
+    expect(result.jsonRows).toEqual([
+      {
+        date: "2024-01-31",
+        recipient: "REDACTED RECIPIENT",
+        description: "REDACTED PAYMENT",
+        status: "Completed",
+        amount: "-1234.50",
+        fee: "0.00",
+        balance: "9007199254740993.01",
+      },
+    ])
+    expect(result.tabRows[0].slice(4)).toEqual([
+      `-1.234,50 ${currency}`,
+      `0,00 ${currency}`,
+      `9.007.199.254.740.993,01 ${currency}`,
+    ])
+  })
+
   test("account fixture pins keys, dates, nulls, signs and precision", () => {
     const result = parseTransactions(
       page("account-transactions.html"),
@@ -174,6 +202,30 @@ describe("transaction pages", () => {
     expect(result.rows).toEqual([["", "", "0.00", ""]])
   })
 
+  test.each([
+    "account",
+    "card",
+  ] as const)("recognizes the bank's no-data notice as empty %s transactions", (kind) => {
+    const result = parseTransactions(page("no-data-transactions.html"), kind)
+    expect(result.jsonRows).toEqual([])
+    expect(result.rows).toEqual([])
+    expect(result.tabRows).toEqual([])
+    expect(result.headers).toEqual(
+      kind === "account" ? ACCOUNT_TRANSACTION_FIELDS : CARD_TRANSACTION_FIELDS
+    )
+  })
+
+  test("a no-data notice cannot hide an unrecognized transaction table", () => {
+    const response = page("no-data-transactions.html")
+    response.body = Buffer.concat([
+      response.body,
+      Buffer.from("<table><tbody><tr><td>Unexpected</td></tr></tbody></table>"),
+    ])
+    expect(() => parseTransactions(response, "account")).toThrow(
+      "Unrecognized NLB transaction table"
+    )
+  })
+
   test("supports the existing headerless account fragment", () => {
     const response = page("account-transactions.html")
     response.body = Buffer.from(response.body.toString().replace(tableHead, ""))
@@ -219,7 +271,7 @@ describe("transaction pages", () => {
     ["29.02.2024", "31.02.2024", "date"],
     ["−1.234,50", "NaN", "amount"],
     ["0,00", "1e6", "amount"],
-    ["9.007.199.254.740.993,01", "123 USD", "amount"],
+    ["9.007.199.254.740.993,01", "123 USDD", "amount"],
   ])("fails the entire response for malformed %s", (before, after, field) => {
     const response = page("account-transactions.html")
     response.body = Buffer.from(response.body.toString().replace(before, after))

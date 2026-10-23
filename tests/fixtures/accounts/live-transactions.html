@@ -1,0 +1,86 @@
+<!-- Minimized live bank layout; all transaction values are synthetic. -->
+<!-- biome-ignore-all lint/a11y/useAnchorContent: Preserve the bank's icon-only pager markup for parser regression coverage. -->
+<table
+  class="table table-striped table-bordered table-hover table-condensed dataTable"
+  role="grid"
+>
+  <thead class="thin-border-bottom">
+    <tr class="warning">
+      <th class="col-dps-transactions-2 text-center"></th>
+      <th
+        class="col-dps-transactions-2 text-center sorting_desc"
+        onclick="iBank.Forms.SetSortingAndSubmitForm('Date', 'ASC', 'RetailTransactionsForm'); "
+      >
+        Датум на валута
+      </th>
+
+      <th
+        class="col-dps-transactions-4 text-center sorting"
+        onclick="iBank.Forms.SetSortingAndSubmitForm('OtherParty', 'ASC', 'RetailTransactionsForm'); "
+      >
+        Име на Налогодавач/Примач
+      </th>
+      <th class="col-dps-transactions-7 text-center breakWord">Опис</th>
+      <th class="col-dps-transactions-6 text-center">Статус</th>
+      <th
+        class="col-dps-transactions-8 text-center sorting"
+        onclick="iBank.Forms.SetSortingAndSubmitForm('Amount', 'ASC', 'RetailTransactionsForm'); "
+      >
+        Износ&nbsp;&nbsp;
+      </th>
+      <th class="col-dps-transactions-6 text-center">Провизија</th>
+      <th class="col-dps-transactions-6 text-center">Состојба</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td></td>
+      <td>31.01.2024</td>
+      <td>REDACTED RECIPIENT</td>
+      <td>REDACTED PAYMENT</td>
+      <td>Completed</td>
+      <td>-1.234,50 MKD</td>
+      <td>0,00 MKD</td>
+      <td>9.007.199.254.740.993,01 MKD</td>
+    </tr>
+  </tbody>
+</table>
+<ul class="pagination">
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '0');"
+      ><i class="ace-icon fa fa-angle-double-left"></i></a
+    >
+  </li>
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '0');"
+      ><i class="ace-icon fa fa-angle-left"></i></a
+    >
+  </li>
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '0'); "
+      >1</a
+    >
+  </li>
+  <li class="active"><a>2</a></li>
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '2'); "
+      >3</a
+    >
+  </li>
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '2');"
+      ><i class="ace-icon fa fa-angle-right"></i></a
+    >
+  </li>
+  <li>
+    <a
+      onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('RetailTransactionsForm', 'PageNumber', '2');"
+      ><i class="ace-icon fa fa-angle-double-right"></i></a
+    >
+  </li>
+</ul>
