@@ -3,6 +3,12 @@ import path from "node:path"
 import { load } from "cheerio"
 import { dateFmt } from "../constants"
 import { bankResponseError, CliError, EXIT_CODES } from "../errors"
+import {
+  validateExportResponse,
+  validatePdf,
+  validateXls,
+  writeExport,
+} from "../exports"
 import { formatCsv, formatJson, formatTab } from "../formatters"
 import { type HttpResponse, nlbPost } from "../http"
 
@@ -118,10 +124,12 @@ export function validateTransactionOptions(
   }
 }
 
-function saveFile(output: string, body: string | Buffer): TransactionsResult {
-  const savePath = path.resolve(output)
-  fs.writeFileSync(savePath, body)
-  return { kind: "file", path: savePath, bytes: Buffer.byteLength(body) }
+function saveFile(
+  output: string,
+  body: string | Buffer,
+  validate: (contents: Buffer) => void
+): TransactionsResult {
+  return writeExport(path.resolve(output), Buffer.from(body), validate)
 }
 
 function exportReport(
@@ -130,23 +138,11 @@ function exportReport(
   accountId: string,
   output?: string
 ): TransactionsResult {
+  validateExportResponse(res)
   const disposition = String(res.headers["content-disposition"] || "")
-  const contentType = String(res.headers["content-type"] || "").toLowerCase()
-  const expectedType =
-    format === "pdf" ? "application/pdf" : "application/vnd.ms-excel"
-  if (
-    res.status < 200 ||
-    res.status >= 300 ||
-    res.body.length === 0 ||
-    contentType.includes("text/html") ||
-    !(disposition || contentType.includes(expectedType))
-  ) {
-    throw bankResponseError(
-      `NLB did not return a valid ${format.toUpperCase()} file. Try --format tab, csv, or json.`
-    )
-  }
+  const validate = format === "xls" ? validateXls : validatePdf
   if (output !== undefined) {
-    return saveFile(output, res.body)
+    return saveFile(output, res.body, validate)
   }
   const match = disposition.match(filenameRegex)
   const filename = path.basename(
@@ -156,7 +152,7 @@ function exportReport(
   )
   const downloads = path.join(process.cwd(), "downloads")
   fs.mkdirSync(downloads, { recursive: true })
-  return saveFile(path.join(downloads, filename), res.body)
+  return saveFile(path.join(downloads, filename), res.body, validate)
 }
 
 function cardHeaders(labels: string[], columnCount: number): string[] {
@@ -181,12 +177,23 @@ function parsePage(
   currentPage: number,
   requestedPageSize: number
 ) {
-  const $ = load(html)
+  const $ = load(html, { sourceCodeLocationInfo: true })
+  const invalid = () =>
+    bankResponseError(
+      "NLB did not return a valid transactions table (incomplete transaction table or document)."
+    )
+  // Cheerio repairs truncated HTML; require real closing tags before exporting.
+  for (const element of $("html, body").toArray()) {
+    const location = element.sourceCodeLocation
+    if (location?.startTag && !location.endTag) {
+      throw invalid()
+    }
+  }
   const table = $("table")
     .filter((_i, el) => $(el).find("tbody").length > 0)
     .first()
-  if (table.length === 0) {
-    throw bankResponseError("NLB did not return a valid transactions table.")
+  if (!table.get(0)?.sourceCodeLocation?.endTag) {
+    throw invalid()
   }
   const columnHeaders = table
     .find("thead th")
@@ -197,15 +204,19 @@ function parsePage(
     : []
   const rows: string[][] = []
   table.find("tbody > tr").each((_i, tr) => {
+    if (!tr.sourceCodeLocation?.endTag) {
+      throw invalid()
+    }
     const cells = $(tr).children("td")
     if (cells.length === 0 || cells.is("[colspan]")) {
       return
     }
     const values = cells.map((_j, td) => $(td).text().trim()).get()
     if (account) {
-      if (values.length >= 8) {
-        rows.push(values.slice(1, 8))
+      if (values.length < 8) {
+        throw invalid()
       }
+      rows.push(values.slice(1, 8))
     } else {
       rows.push(values)
     }
@@ -284,11 +295,7 @@ export async function fetchTransactions(
   for (let page = 1; ; page++) {
     request.PageNumber = String(page)
     const res = await nlbPost(endpoint, cookie, request)
-    if (res.status < 200 || res.status >= 300) {
-      throw bankResponseError(
-        `NLB transaction request failed (HTTP ${res.status}).`
-      )
-    }
+    validateExportResponse(res)
     const parsed = parsePage(
       res.body.toString("utf-8"),
       endpoint === "/Retail/Transactions",
@@ -321,7 +328,15 @@ export async function fetchTransactions(
   )
   const result = { kind: "data" as const, headers, rows, jsonRows }
   if (output !== undefined) {
-    return saveFile(output, `${formatTransactionData(result, format)}\n`)
+    return saveFile(
+      output,
+      `${formatTransactionData(result, format)}\n`,
+      (contents) => {
+        if (format === "json") {
+          JSON.parse(contents.toString("utf-8"))
+        }
+      }
+    )
   }
   return rows.length === 0 ? null : result
 }
