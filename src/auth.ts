@@ -1,7 +1,12 @@
 import readline from "node:readline"
-import { BASE_URL, COOKIES_FILE } from "./constants"
+import { BASE_URL } from "./constants"
 import { isLoginRedirect, nlbGet } from "./http"
-import { loadState, saveCookies } from "./state"
+import {
+  getSessionFile,
+  loadState,
+  saveCookies,
+  validateProfile,
+} from "./state"
 
 function parseSetCookies(res: Response): string[] {
   return res.headers.getSetCookie?.() ?? []
@@ -29,8 +34,12 @@ function mergeCookies(existing: string, newSetCookies: string[]): string {
     .join("; ")
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: <explanation>
-async function loginWithPush(username: string): Promise<string> {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The push login flow handles multiple sequential responses and polling.
+async function loginWithPush(
+  profile: string,
+  username: string
+): Promise<string> {
+  validateProfile(profile)
   let cookies = ""
 
   // Step 1: GET login page to get session cookies
@@ -157,8 +166,8 @@ async function loginWithPush(username: string): Promise<string> {
       }
 
       console.log("Login successful!")
-      saveCookies(cookies, username)
-      console.log(`Session saved to ${COOKIES_FILE}`)
+      saveCookies(profile, cookies, username)
+      console.log(`Session saved to ${getSessionFile(profile)}`)
       return cookies
     }
   }
@@ -166,9 +175,12 @@ async function loginWithPush(username: string): Promise<string> {
   throw new Error("Timed out waiting for push approval.")
 }
 
-export async function getSession(_username?: string): Promise<string> {
+export async function getSession(
+  profile: string,
+  _username?: string
+): Promise<string> {
   let username: string | undefined = _username
-  const state = loadState()
+  const state = loadState(profile)
   if (state) {
     const res = await nlbGet(
       "/Home/Balances?bankid=tutunska.banka@ibank",
@@ -183,14 +195,17 @@ export async function getSession(_username?: string): Promise<string> {
   }
   if (!username) {
     throw new Error(
-      "No username available. Run `login --username <user>` first."
+      `No username available. Run \`nlbcli --profile ${profile} login --username <user>\` first.`
     )
   }
-  return loginWithPush(username)
+  return loginWithPush(profile, username)
 }
 
-export async function cmdLogin(username: string): Promise<void> {
-  await loginWithPush(username)
+export async function cmdLogin(
+  profile: string,
+  username: string
+): Promise<void> {
+  await loginWithPush(profile, username)
 }
 
 export function prompt(question: string): Promise<string> {

@@ -38,9 +38,20 @@ npx skills add ivasilov/nlbcli
 nlbcli login --username <your-username>
 ```
 
-This sends a push notification to your phone. Once approved, the session is saved to `~/.nlbcli/cookies.json` so subsequent commands work without re-authenticating. Expired sessions are detected automatically and trigger re-authentication.
+This sends a push notification to your phone. Once approved, the session is saved to `~/.nlbcli/profiles/default/session.json` so subsequent commands work without re-authenticating. Expired sessions are detected automatically and trigger re-authentication using that profile's saved username.
 
-> **Warning:** Your session cookie is stored in plaintext at `~/.nlbcli/cookies.json`. Keep this directory safe.
+Use the root `--profile` option before the command to keep different logins separate:
+
+```bash
+nlbcli --profile personal login --username <personal-username>
+nlbcli --profile work login --username <work-username>
+nlbcli --profile personal accounts transactions <ACCOUNT_ID> --format json
+nlbcli --profile work cards transactions <CARD_ID>
+```
+
+Every login, account, and card command uses the selected profile. Omitting `--profile` selects `default`. Each profile stores its session and username at `~/.nlbcli/profiles/<profile>/session.json`. Profile names must start with an ASCII letter or digit and contain only ASCII letters, digits, dots, underscores, or hyphens.
+
+Profile directories have permissions `0700` and session files have permissions `0600`. Session cookies are stored in plaintext. The old shared `~/.nlbcli/cookies.json` is no longer used; run `login` again for each profile after upgrading.
 
 ## Commands
 

@@ -2,7 +2,8 @@ import path from "node:path"
 
 export const BASE_URL = "https://www.nlbklik.com.mk"
 export const STATE_DIR = path.join(process.env.HOME || "~", ".nlbcli")
-export const COOKIES_FILE = path.join(STATE_DIR, "cookies.json")
+export const PROFILES_DIR = path.join(STATE_DIR, "profiles")
+export const DEFAULT_PROFILE = "default"
 
 const dateFmtIntl = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",

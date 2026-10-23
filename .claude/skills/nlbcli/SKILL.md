@@ -11,7 +11,7 @@ description: Work with the NLB CLI tool for interacting with NLB bank accounts a
 
 - The CLI must be installed and available as `nlbcli` in the user's PATH
 - The user must have an NLB Klik account with push notification authentication enabled on their phone
-- Session is stored at `~/.nlbcli/cookies.json` — if commands fail with session errors, the user needs to re-authenticate
+- Session is stored at `~/.nlbcli/profiles/<profile>/session.json` (`default` when `--profile` is omitted) — if commands fail with session errors, the user needs to re-authenticate in that profile
 
 ## Authentication
 
@@ -23,7 +23,9 @@ nlbcli login [--username <user>]
 
 This triggers a push notification to the user's phone. The CLI waits up to 120 seconds for approval. Once authenticated, the session cookie is saved and reused for subsequent commands.
 
-If a command fails due to an expired session (HTTP 302 redirect), ask the user to run `nlbcli login` again.
+For multiple logins, put `--profile <profile>` before the command, for example `nlbcli --profile work login --username <user>`, `nlbcli --profile work accounts transactions <id>`, or `nlbcli --profile work cards transactions <id>`. Use the same profile for all commands for that login. Profile names start with an ASCII letter or digit and contain only ASCII letters, digits, dots, underscores, or hyphens. Each profile has its own session and saved username; expired sessions re-authenticate within that profile. The old shared `~/.nlbcli/cookies.json` is no longer read, so log in again after upgrading.
+
+If a command fails due to an expired session (HTTP 302 redirect), ask the user to run `nlbcli --profile <profile> login` again using the selected profile.
 
 ## Available commands
 
@@ -77,6 +79,6 @@ Use `--type` to filter by transaction type and `--name` to filter by name/descri
 
 ## Troubleshooting
 
-- **Session expired**: Run `nlbcli login` to re-authenticate
+- **Session expired**: Run `nlbcli --profile <profile> login` to re-authenticate in the selected profile
 - **Command not found**: Ensure `nlbcli` is installed and in PATH
 - **No data returned**: The account/card ID may be incorrect — verify with `accounts list` or `cards list`
