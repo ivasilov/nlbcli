@@ -40,7 +40,9 @@ Choose JSON or CSV for structured data, XLS for a bank report, or PDF for an **a
 
 Both transaction commands collect all pages for tab/JSON/CSV and accept `--output <PATH>`. Ensure the parent directory exists. Without `--output`, text goes to stdout and reports go to `./downloads/`; save confirmations go to stderr. Failed exports preserve any existing destination.
 
-JSON/CSV transaction dates use `YYYY-MM-DD`, monetary values are exact decimal strings, and missing values are `null` in JSON or empty CSV cells. Preserve monetary precision when processing them. For field names, fixed headers, schemas, or compatibility questions, read the [v1 export contract](https://github.com/ivasilov/nlbcli/blob/master/docs/transaction-exports.md).
+JSON/CSV transaction dates use `YYYY-MM-DD`, monetary values are exact decimal strings, and missing values are `null` in JSON or empty CSV cells. Use decimal arithmetic for monetary calculations.
+
+Before writing an importer, calculating transaction totals, or validating exports, read the [v1 export contract](https://github.com/ivasilov/nlbcli/blob/master/docs/transaction-exports.md) for the account/card schemas, normalization rules, and validation guarantees. Consult its compatibility section when changing export consumers or the export format.
 
 ## Recover a failed command
 
