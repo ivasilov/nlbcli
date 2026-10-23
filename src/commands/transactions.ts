@@ -11,6 +11,7 @@ import {
 } from "../exports"
 import { formatCsv, formatJson, formatTab } from "../formatters"
 import { type HttpResponse, nlbPost } from "../http"
+import { retrieveAccountTransactions } from "../transaction-pagination"
 import {
   ACCOUNT_TRANSACTION_FIELDS,
   CARD_TRANSACTION_FIELDS,
@@ -235,6 +236,29 @@ export async function fetchTransactions(
     return exportReport(res, format, data.AccountID, output)
   }
 
+  const result =
+    endpoint === "/Retail/Transactions"
+      ? await retrieveAccountTransactions(cookie, request)
+      : await fetchCardPages(cookie, endpoint, request)
+  if (output !== undefined) {
+    return saveFile(
+      output,
+      `${formatTransactionData(result, format)}\n`,
+      (contents) => {
+        if (format === "json") {
+          JSON.parse(contents.toString("utf-8"))
+        }
+      }
+    )
+  }
+  return result
+}
+
+async function fetchCardPages(
+  cookie: string,
+  endpoint: string,
+  request: Record<string, string>
+): Promise<TransactionData> {
   const rows: string[][] = []
   const tabRows: string[][] = []
   const jsonRows: TransactionData["jsonRows"] = []
@@ -274,17 +298,5 @@ export async function fetchTransactions(
       break
     }
   }
-  const result = { kind: "data" as const, headers, rows, tabRows, jsonRows }
-  if (output !== undefined) {
-    return saveFile(
-      output,
-      `${formatTransactionData(result, format)}\n`,
-      (contents) => {
-        if (format === "json") {
-          JSON.parse(contents.toString("utf-8"))
-        }
-      }
-    )
-  }
-  return result
+  return { kind: "data", headers, rows, tabRows, jsonRows }
 }

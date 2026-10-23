@@ -172,6 +172,8 @@ nlbcli accounts transactions <ACCOUNT_ID> --format json --output ./transactions.
 
 Exports are validated in a temporary file beside the destination, then atomically replace it. Failed or incomplete downloads leave an existing destination unchanged and remove temporary files. Progress and save messages go to stderr.
 
+Account transaction text exports (`tab`, `csv`, `json`) retrieve all pages in the bank's order before printing any transaction data. Failed requests, repeated pages, and inconsistent pagination cause an error instead of a partial export.
+
 Run `nlbcli --help` for all available commands and options.
 
 Account and card transactions support stable JSON and CSV exports. Dates use
