@@ -589,6 +589,13 @@ const nonInteractiveFlag = /^--non-interactive(?:=.*)?$/i
 const wizardFlag = /^--wizard(?:=.*)?$/i
 
 export async function runCli(argv: string[]): Promise<number> {
+  // Route the short alias through the framework's built-in version option.
+  const args = [...argv]
+  for (let i = 2; i < args.length && args[i] !== "--"; i++) {
+    if (args[i] === "-v") {
+      args[i] = "--version"
+    }
+  }
   // The framework's built-in wizard prompts before command handlers run.
   if (
     argv.slice(2).some((arg) => nonInteractiveFlag.test(arg)) &&
@@ -598,7 +605,7 @@ export async function runCli(argv: string[]): Promise<number> {
     return EXIT_CODES.arguments
   }
   const result = await Effect.runPromiseExit(
-    cli(argv).pipe(Effect.provide(NodeContext.layer))
+    cli(args).pipe(Effect.provide(NodeContext.layer))
   )
   if (Exit.isSuccess(result)) {
     return EXIT_CODES.success
