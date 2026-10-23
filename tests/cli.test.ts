@@ -33,6 +33,7 @@ function run(args: string[]) {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.spyOn(console, "log").mockImplementation(() => undefined)
+  vi.spyOn(console, "error").mockImplementation(() => undefined)
 })
 
 afterEach(() => {
@@ -64,12 +65,16 @@ test.each([
 ])("root profile reaches %j", async (...args) => {
   const result = await run(["--profile", "work", ...args])
   expect(Exit.isSuccess(result)).toBe(true)
-  expect(getSession).toHaveBeenCalledExactlyOnceWith("work")
+  expect(getSession).toHaveBeenCalledExactlyOnceWith("work", undefined, {
+    nonInteractive: false,
+  })
 })
 
 test("omitting --profile selects default", async () => {
   expect(Exit.isSuccess(await run(["cards", "list"]))).toBe(true)
-  expect(getSession).toHaveBeenCalledExactlyOnceWith("default")
+  expect(getSession).toHaveBeenCalledExactlyOnceWith("default", undefined, {
+    nonInteractive: false,
+  })
 })
 
 test.each([

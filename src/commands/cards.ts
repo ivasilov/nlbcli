@@ -1,11 +1,17 @@
-// biome-ignore lint/performance/noNamespaceImport: <explanation>
+// biome-ignore lint/performance/noNamespaceImport: Cheerio exposes its parser through the module namespace.
 import * as cheerio from "cheerio"
 import { dateFmt } from "../constants"
-import { nlbGet, nlbPost } from "../http"
+import {
+  nlbGet,
+  nlbPost,
+  requireBalancesPage,
+  requireHtml,
+  TABLE_HTML,
+} from "../http"
 
 export async function cmdListCards(cookie: string): Promise<string[]> {
   const res = await nlbGet("/Home/Balances?bankid=tutunska.banka@ibank", cookie)
-  const html = res.body.toString("utf-8")
+  const html = requireBalancesPage(res)
   return [...new Set(html.match(/[0-9]{8,15}\/[0-9]{4}/g) || [])]
 }
 
@@ -28,14 +34,14 @@ export async function cmdCardBalance(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(res.body.toString("utf-8"))
+  const $ = cheerio.load(requireHtml(res))
   const cells = $(
     "#main_CmsAccountBalanceForm .col-lg-12 > .col-lg-8 > .row > div"
   )
     .map((_i, el) => $(el).text().trim())
     .get()
 
-  if (cells.length === 0) {
+  if (cells.length < 19) {
     return null
   }
 
@@ -85,7 +91,7 @@ export async function cmdCardTransactions(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(res.body.toString("utf-8"))
+  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
   const rows: string[][] = []
   $("tbody > tr").each((_i, tr) => {
     const tds = $(tr).find("td")

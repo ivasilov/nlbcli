@@ -1,5 +1,7 @@
-import { Args, Command, HelpDoc, Options } from "@effect/cli"
-import { Effect, Option } from "effect"
+import { Args, Command, HelpDoc, Options, ValidationError } from "@effect/cli"
+import { NodeContext } from "@effect/platform-node"
+import { Cause, Effect, Exit, Option } from "effect"
+import packageJson from "../package.json"
 import { cmdLogin, getSession, prompt } from "./auth"
 import {
   cmdAccountBalance,
@@ -13,8 +15,14 @@ import {
   cmdListCards,
 } from "./commands/cards"
 import { DEFAULT_PROFILE, dateFmt } from "./constants"
+import {
+  authenticationError,
+  bankResponseError,
+  CliError,
+  EXIT_CODES,
+} from "./errors"
 import { printCsv, printJson, printTab } from "./formatters"
-import { validateProfile } from "./state"
+import { loadState, validateProfile } from "./state"
 
 const rootCommand = Command.make("nlbcli", {
   profile: Options.text("profile").pipe(
@@ -22,12 +30,35 @@ const rootCommand = Command.make("nlbcli", {
     Options.mapTryCatch(validateProfile, (error) => HelpDoc.p(String(error))),
     Options.withDefault(DEFAULT_PROFILE)
   ),
-}).pipe(Command.withDescription("NLB Tutunska CLI client"))
+  nonInteractive: Options.boolean("non-interactive").pipe(
+    Options.withDescription(
+      "Use only a saved session; never prompt or wait for push approval"
+    )
+  ),
+})
 
-function withProfile<A>(handler: (profile: string) => Promise<A>) {
+function attempt<A>(run: () => Promise<A>) {
+  return Effect.tryPromise({ try: run, catch: (error) => error })
+}
+
+function dataCommand<A>(run: (cookie: string) => Promise<A>) {
   return Effect.gen(function* () {
-    const { profile } = yield* rootCommand
-    return yield* Effect.promise(() => handler(profile))
+    const { profile, nonInteractive } = yield* rootCommand
+    return yield* attempt(async () => {
+      const cookie = await getSession(profile, undefined, { nonInteractive })
+      try {
+        return await run(cookie)
+      } catch (error) {
+        if (
+          error instanceof CliError &&
+          error.exitCode === EXIT_CODES.authentication
+        ) {
+          // Include the username even when the session expires after validation.
+          throw authenticationError(profile, loadState(profile)?.username)
+        }
+        throw error
+      }
+    })
   })
 }
 
@@ -37,27 +68,57 @@ const usernameOption = Options.text("username").pipe(
   Options.optional
 )
 
-const formatOption = Options.text("format").pipe(
+const formatOption = Options.choice("format", ["tab", "csv", "json"]).pipe(
+  Options.withDescription("Output format (tab|csv|json)"),
+  Options.withDefault("tab")
+)
+
+const transactionsFormatOption = Options.choice("format", [
+  "tab",
+  "csv",
+  "json",
+  "xls",
+  "pdf",
+]).pipe(
   Options.withDescription("Output format (tab|csv|json|xls|pdf)"),
   Options.withDefault("tab")
 )
 
-const transactionsFormatOption = Options.text("format").pipe(
-  Options.withDescription("Output format (tab|csv|json|xls|pdf)"),
-  Options.withDefault("tab")
+const bankDate = /^(\d{2})\.(\d{2})\.(\d{4})$/
+
+function validateDate(value: string): string {
+  const match = bankDate.exec(value)
+  if (match) {
+    const [, day, month, year] = match.map(Number)
+    const date = new Date(year, month - 1, day)
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return value
+    }
+  }
+  throw new Error("Expected a valid date in dd.mm.yyyy format.")
+}
+
+const dateOption = (name: string) =>
+  Options.text(name).pipe(
+    Options.mapTryCatch(validateDate, () =>
+      HelpDoc.p(`--${name} must be a valid date in dd.mm.yyyy format.`)
+    ),
+    Options.optional
+  )
+
+const startOption = dateOption("start").pipe(
+  Options.withDescription("Start date (dd.mm.yyyy)")
 )
 
-const startOption = Options.text("start").pipe(
-  Options.withDescription("Start date (dd.mm.yyyy)"),
-  Options.optional
+const endOption = dateOption("end").pipe(
+  Options.withDescription("End date (dd.mm.yyyy)")
 )
 
-const endOption = Options.text("end").pipe(
-  Options.withDescription("End date (dd.mm.yyyy)"),
-  Options.optional
-)
-
-const typeOption = Options.text("type").pipe(
+const typeOption = Options.choice("type", ["", "in", "out"]).pipe(
   Options.withDescription("Filter by direction (in|out)"),
   Options.withDefault("")
 )
@@ -77,19 +138,29 @@ const loginCommand = Command.make(
   "login",
   { username: usernameOption },
   ({ username }) =>
-    withProfile(async (profile) => {
-      const u = Option.isSome(username)
-        ? username.value
-        : await prompt("Username: ")
-      await cmdLogin(profile, u)
+    Effect.gen(function* () {
+      const { profile, nonInteractive } = yield* rootCommand
+      if (nonInteractive) {
+        return yield* Effect.fail(
+          new CliError(
+            EXIT_CODES.arguments,
+            `Login requires push approval. Run \`nlbcli --profile ${profile} login\` without --non-interactive.`
+          )
+        )
+      }
+      yield* attempt(async () => {
+        const u = Option.isSome(username)
+          ? username.value
+          : await prompt("Username: ")
+        await cmdLogin(profile, u)
+      })
     })
 ).pipe(Command.withDescription("Authenticate via push notification"))
 
 // --- Account commands ---
 
 const accountsListCommand = Command.make("list", {}, () =>
-  withProfile(async (profile) => {
-    const cookie = await getSession(profile)
+  dataCommand(async (cookie) => {
     const accounts = await cmdListAccounts(cookie)
     console.log("Accounts:")
     for (const a of accounts) {
@@ -102,12 +173,12 @@ const accountsBalanceCommand = Command.make(
   "balance",
   { id: accountIdArg, format: formatOption },
   ({ id, format }) =>
-    withProfile(async (profile) => {
-      const cookie = await getSession(profile)
+    dataCommand(async (cookie) => {
       const data = await cmdAccountBalance(cookie, id)
       if (!data) {
-        console.error("No balance data found. Account ID may be invalid.")
-        return
+        throw bankResponseError(
+          "No balance data found. Account ID may be invalid."
+        )
       }
       if (format === "json") {
         printJson([data])
@@ -132,8 +203,7 @@ const accountsTransactionsCommand = Command.make(
     name: nameOption,
   },
   ({ id, start, end, format, type, name }) =>
-    withProfile(async (profile) => {
-      const cookie = await getSession(profile)
+    dataCommand(async (cookie) => {
       const today = new Date()
       const monthAgo = new Date(today)
       monthAgo.setDate(monthAgo.getDate() - 30)
@@ -147,11 +217,14 @@ const accountsTransactionsCommand = Command.make(
         name
       )
       if (!result) {
-        console.log("No transactions found.")
+        if (format === "json") {
+          printJson([])
+        }
+        console.error("No transactions found.")
         return
       }
       if (result.kind === "file") {
-        console.log(`SAVED: ${result.path} (${result.bytes} bytes)`)
+        console.error(`SAVED: ${result.path} (${result.bytes} bytes)`)
       } else if (format === "json") {
         printJson(result.jsonRows)
       } else if (format === "csv") {
@@ -166,8 +239,7 @@ const accountsReservationsCommand = Command.make(
   "reservations",
   { id: accountIdArg },
   ({ id }) =>
-    withProfile(async (profile) => {
-      const cookie = await getSession(profile)
+    dataCommand(async (cookie) => {
       const rows = await cmdAccountReservations(cookie, id)
       for (const r of rows) {
         console.log(r.join("\t"))
@@ -188,8 +260,7 @@ const accountsCommand = Command.make("accounts").pipe(
 // --- Card commands ---
 
 const cardsListCommand = Command.make("list", {}, () =>
-  withProfile(async (profile) => {
-    const cookie = await getSession(profile)
+  dataCommand(async (cookie) => {
     const cards = await cmdListCards(cookie)
     console.log("Cards:")
     for (const c of cards) {
@@ -202,12 +273,10 @@ const cardsBalanceCommand = Command.make(
   "balance",
   { id: cardIdArg },
   ({ id }) =>
-    withProfile(async (profile) => {
-      const cookie = await getSession(profile)
+    dataCommand(async (cookie) => {
       const data = await cmdCardBalance(cookie, id)
       if (!data) {
-        console.error("No card data found. Card ID may be invalid.")
-        return
+        throw bankResponseError("No card data found. Card ID may be invalid.")
       }
       for (const [k, v] of Object.entries(data)) {
         console.log(`${k}: ${v}`)
@@ -219,8 +288,7 @@ const cardsTransactionsCommand = Command.make(
   "transactions",
   { id: cardIdArg },
   ({ id }) =>
-    withProfile(async (profile) => {
-      const cookie = await getSession(profile)
+    dataCommand(async (cookie) => {
       const rows = await cmdCardTransactions(cookie, id)
       for (const r of rows) {
         console.log(r.join("\t"))
@@ -240,5 +308,45 @@ const cardsCommand = Command.make("cards").pipe(
 // --- Root command ---
 
 export const command = rootCommand.pipe(
+  Command.withDescription("NLB Tutunska CLI client"),
   Command.withSubcommands([loginCommand, accountsCommand, cardsCommand])
 )
+
+// --- Run ---
+
+const cli = Command.run(command, {
+  name: "nlbcli",
+  version: packageJson.version,
+})
+
+const nonInteractiveFlag = /^--non-interactive(?:=.*)?$/i
+const wizardFlag = /^--wizard(?:=.*)?$/i
+
+export async function runCli(argv: string[]): Promise<number> {
+  // The framework's built-in wizard prompts before command handlers run.
+  if (
+    argv.slice(2).some((arg) => nonInteractiveFlag.test(arg)) &&
+    argv.slice(2).some((arg) => wizardFlag.test(arg))
+  ) {
+    console.error("--wizard cannot be used with --non-interactive.")
+    return EXIT_CODES.arguments
+  }
+  const result = await Effect.runPromiseExit(
+    cli(argv).pipe(Effect.provide(NodeContext.layer))
+  )
+  if (Exit.isSuccess(result)) {
+    return EXIT_CODES.success
+  }
+  const error = Cause.squash(result.cause)
+  if (ValidationError.isValidationError(error)) {
+    return EXIT_CODES.arguments
+  }
+  if (error instanceof CliError) {
+    console.error(error.message)
+    return error.exitCode
+  }
+  console.error(
+    error instanceof Error ? error.message : "Unexpected CLI error."
+  )
+  return EXIT_CODES.unexpected
+}

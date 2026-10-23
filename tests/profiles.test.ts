@@ -14,6 +14,7 @@ beforeEach(async () => {
   state = await import("../src/state")
   auth = await import("../src/auth")
   vi.spyOn(console, "log").mockImplementation(() => undefined)
+  vi.spyOn(console, "error").mockImplementation(() => undefined)
   vi.stubGlobal(
     "fetch",
     vi.fn().mockRejectedValue(new Error("Unexpected fetch"))
@@ -142,6 +143,18 @@ describe("profile storage", () => {
     fs.writeFileSync(state.getSessionFile("work"), "invalid JSON")
     expect(state.loadState("work")).toBeNull()
   })
+  test.each([
+    "null",
+    "{}",
+    '{"cookie":""}',
+    '{"cookie":"   "}',
+    '{"cookie":123}',
+    '{"cookie":{"session":"test"}}',
+  ])("treats invalid session data as unauthenticated: %s", (contents) => {
+    state.saveCookies("work", "session=test", "bob")
+    fs.writeFileSync(state.getSessionFile("work"), contents)
+    expect(state.loadState("work")).toBeNull()
+  })
 })
 
 function pushResponse(url: string | URL, init?: RequestInit): Response {
@@ -176,6 +189,54 @@ function mockPushLogin() {
 }
 
 describe("profile authentication", () => {
+  test("non-interactive mode never falls back from a missing profile", async () => {
+    state.saveCookies("personal", "session=alice", "alice")
+    await expect(
+      auth.getSession("work", undefined, { nonInteractive: true })
+    ).rejects.toThrow("nlbcli --profile work login --username <user>")
+    expect(fetch).not.toHaveBeenCalled()
+    expect(state.loadState("personal")).toEqual({
+      cookie: "session=alice",
+      username: "alice",
+    })
+  })
+
+  test("non-interactive mode rejects an expired profile without refreshing it", async () => {
+    state.saveCookies("personal", "session=alice", "alice")
+    state.saveCookies("work", "session=bob-old", "bob")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 302 }))
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(
+      auth.getSession("work", undefined, { nonInteractive: true })
+    ).rejects.toThrow("nlbcli --profile work login --username 'bob'")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][1].headers.Cookie).toBe("session=bob-old")
+    expect(state.loadState("work")).toEqual({
+      cookie: "session=bob-old",
+      username: "bob",
+    })
+    expect(state.loadState("personal")).toEqual({
+      cookie: "session=alice",
+      username: "alice",
+    })
+  })
+
+  test("non-interactive mode reuses only the selected profile's valid cookie", async () => {
+    state.saveCookies("personal", "session=alice", "alice")
+    state.saveCookies("work", "session=bob", "bob")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('<div id="main_Balances"></div>'))
+    vi.stubGlobal("fetch", fetchMock)
+    expect(
+      await auth.getSession("work", undefined, { nonInteractive: true })
+    ).toBe("session=bob")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][1].headers.Cookie).toBe("session=bob")
+  })
+
   test("logs two users into separate profiles", async () => {
     vi.useFakeTimers()
     mockPushLogin()
@@ -201,7 +262,9 @@ describe("profile authentication", () => {
     state.saveCookies("work", "session=bob", "bob")
     const fetchMock = vi
       .fn()
-      .mockImplementation(() => Promise.resolve(new Response("")))
+      .mockImplementation(() =>
+        Promise.resolve(new Response('<div id="main_Balances"></div>'))
+      )
     vi.stubGlobal("fetch", fetchMock)
 
     expect(await auth.getSession("personal")).toBe("session=alice")

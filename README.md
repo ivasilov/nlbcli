@@ -53,6 +53,28 @@ Every login, account, and card command uses the selected profile. Omitting `--pr
 
 Profile directories have permissions `0700` and session files have permissions `0600`. Session cookies are stored in plaintext. The old shared `~/.nlbcli/cookies.json` is no longer used; run `login` again for each profile after upgrading.
 
+For scripts, use the global `--non-interactive` flag with any account or card data command:
+
+```bash
+nlbcli --profile work --non-interactive accounts balance <ACCOUNT_ID> --format json
+nlbcli --profile work cards list --non-interactive
+```
+
+The flag works before or after subcommands and combines with `--profile <name>` (or `default` when omitted). These commands use only the saved session and never prompt, request push approval, or require a TTY. If the session is missing, unreadable, invalid, or expired, they exit with code `3` and print the login command to stderr. Run that command interactively, then retry. Only the selected profile is read, and the login instruction includes `--profile <name>` and its saved username when available. No other profile is used as a fallback. `login` and `--wizard` cannot be used with `--non-interactive`.
+
+Data is written to stdout. Progress, download confirmations, empty-result notices, and errors are written to stderr. Empty JSON transaction results are `[]`. Network requests time out after 15 seconds; non-interactive commands never wait for the push approval timeout.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (including valid empty results) |
+| `1` | Unexpected local/runtime error |
+| `2` | Invalid arguments, including unsupported formats, invalid dates, or interactive options combined with `--non-interactive` |
+| `3` | Authentication required, missing/expired session, or failed login |
+| `4` | Network failure, request timeout, or interrupted response |
+| `5` | Invalid bank response: unexpected HTTP status, unrecognized/malformed data, or invalid report file |
+
 ## Commands
 
 ### Accounts
@@ -84,7 +106,7 @@ nlbcli accounts transactions <ACCOUNT_ID> \
 
 ### Output formats
 
-Use `--format` to control output: `tab` (default), `csv`, `json`, `xls`, or `pdf`. File exports (`xls`, `pdf`) are saved to a `downloads/` directory when NLB returns a valid report file.
+Account balances support `--format tab` (default), `csv`, or `json`. Account transactions additionally support `xls` and `pdf`. File exports are saved to a `downloads/` directory when NLB returns a valid report file; the saved path is reported on stderr.
 
 Run `nlbcli --help` for all available commands and options.
 
