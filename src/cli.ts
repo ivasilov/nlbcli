@@ -511,14 +511,16 @@ function makePaymentCommand(mode: PaymentMode) {
   ).pipe(
     Command.withDescription(
       mode === "create"
-        ? "Validate and save a payment order"
-        : "Review, sign, and submit a payment order"
+        ? "EXPERIMENTAL: Validate and save a payment order"
+        : "EXPERIMENTAL: Review, sign, and submit a payment order"
     )
   )
 }
 
 const paymentsCommand = Command.make("payments").pipe(
-  Command.withDescription("Create and send PP30, PP50, and PP53 payments"),
+  Command.withDescription(
+    "EXPERIMENTAL: Create and send PP30, PP50, and PP53 payments"
+  ),
   Command.withSubcommands([
     makePaymentCommand("create"),
     makePaymentCommand("send"),

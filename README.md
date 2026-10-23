@@ -106,6 +106,10 @@ nlbcli accounts transactions <ACCOUNT_ID> \
 
 ### Payments
 
+> [!CAUTION]
+> Payment commands are experimental. Carefully review every payment and verify
+> its final status in NLB Klik, especially after a timeout or unknown response.
+
 Create a saved payment order without signing it:
 
 ```bash
