@@ -1,7 +1,7 @@
 {
   "name": "nlbcli",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "A CLI tool for managing NLB Tutunska accounts and cards.",
   "author": "Ivan Vasilov <vasilov.ivan@mail.com>",
   "license": "MIT",
@@ -32,7 +32,7 @@
     "dev": "tsdown --watch",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm run build",
+    "prepublishOnly": "git pull && pnpm run build",
     "start": "node dist/index.mjs",
     "check": "ultracite check",
     "fix": "ultracite fix"
