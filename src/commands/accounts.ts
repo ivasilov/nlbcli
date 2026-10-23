@@ -1,9 +1,4 @@
-import fs from "node:fs"
-import path from "node:path"
-// biome-ignore lint/performance/noNamespaceImport: Cheerio exposes its parser through the module namespace.
-import * as cheerio from "cheerio"
-import { dateFmt } from "../constants"
-import { bankResponseError } from "../errors"
+import { load } from "cheerio"
 import {
   nlbGet,
   nlbPost,
@@ -11,6 +6,11 @@ import {
   requireHtml,
   TABLE_HTML,
 } from "../http"
+import {
+  fetchTransactions,
+  type TransactionsResult,
+  validateTransactionOptions,
+} from "./transactions"
 
 export async function cmdListAccounts(cookie: string): Promise<string[]> {
   const res = await nlbGet("/Home/Balances?bankid=tutunska.banka@ibank", cookie)
@@ -39,7 +39,7 @@ export async function cmdAccountBalance(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(requireHtml(res))
+  const $ = load(requireHtml(res))
   const cells = $(".dps-content")
     .map((_i, el) => $(el).text().trim())
     .get()
@@ -61,17 +61,8 @@ export async function cmdAccountBalance(
   }
 }
 
-export type TransactionsResult =
-  | { kind: "file"; path: string; bytes: number }
-  | {
-      kind: "data"
-      headers: string[]
-      rows: string[][]
-      jsonRows: Record<string, string>[]
-    }
-  | null
+export type { TransactionsResult } from "./transactions"
 
-const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
 export async function cmdAccountTransactions(
   cookie: string,
   accountId: string,
@@ -79,8 +70,10 @@ export async function cmdAccountTransactions(
   endDate: string,
   format: string,
   direction: string,
-  name: string
+  name: string,
+  output?: string
 ): Promise<TransactionsResult> {
+  validateTransactionOptions(startDate, endDate, format, output)
   const directionMap: Record<string, string> = { in: "1", out: "-1" }
 
   const data: Record<string, string> = {
@@ -110,74 +103,13 @@ export async function cmdAccountTransactions(
     "X-Requested-With": "XMLHttpRequest",
   }
 
-  // File export formats
-  if (["xls", "pdf"].includes(format)) {
-    data.Report = format === "xls" ? "Excel" : "Pdf"
-    const res = await nlbPost("/Retail/Transactions", cookie, data)
-    const disposition = (res.headers["content-disposition"] as string) || ""
-    const contentType = (
-      (res.headers["content-type"] as string) || ""
-    ).toLowerCase()
-    const expectedContentType =
-      format === "pdf" ? "application/pdf" : "application/vnd.ms-excel"
-
-    if (
-      res.status < 200 ||
-      res.status >= 300 ||
-      res.body.length === 0 ||
-      !(disposition || contentType.includes(expectedContentType))
-    ) {
-      throw bankResponseError(
-        `NLB did not return a valid ${format.toUpperCase()} file. Try --format tab, csv, or json.`
-      )
-    }
-
-    const match = disposition.match(filenameRegex)
-    const ext = format === "pdf" ? "pdf" : "xls"
-    const filename = path.basename(
-      match
-        ? match[1].replace(/['"]/g, "")
-        : `transactions_${accountId}_${dateFmt(new Date())}.${ext}`
-    )
-
-    const downloadsDir = path.join(process.cwd(), "downloads")
-    if (!fs.existsSync(downloadsDir)) {
-      fs.mkdirSync(downloadsDir, { recursive: true })
-    }
-    const savePath = path.join(downloadsDir, filename)
-    fs.writeFileSync(savePath, res.body)
-    return { kind: "file", path: savePath, bytes: res.body.length }
-  }
-
-  // Text output formats (tab, csv, json)
-  const res = await nlbPost("/Retail/Transactions", cookie, data)
-  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
-  const headers = [
-    "date",
-    "recipient",
-    "description",
-    "status",
-    "amount",
-    "fee",
-    "balance",
-  ]
-  const rows: string[][] = []
-  const jsonRows: Record<string, string>[] = []
-
-  $("tbody > tr").each((_i, tr) => {
-    const tds = $(tr).find("td").slice(1)
-    const vals = tds.map((_j, td) => $(td).text().trim()).get()
-    if (vals.length >= 7) {
-      rows.push(vals.slice(0, 7))
-      jsonRows.push(Object.fromEntries(headers.map((h, idx) => [h, vals[idx]])))
-    }
-  })
-
-  if (rows.length === 0) {
-    return null
-  }
-
-  return { kind: "data", headers, rows, jsonRows }
+  return await fetchTransactions(
+    cookie,
+    "/Retail/Transactions",
+    data,
+    format,
+    output
+  )
 }
 
 export async function cmdAccountReservations(
@@ -201,7 +133,7 @@ export async function cmdAccountReservations(
     "X-Requested-With": "XMLHttpRequest",
   })
 
-  const $ = cheerio.load(requireHtml(res, TABLE_HTML))
+  const $ = load(requireHtml(res, TABLE_HTML))
   const rows: string[][] = []
   $("tbody > tr").each((_i, tr) => {
     const tds = $(tr).find("td")

@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Worksheet ss:Name="REDACTED"><Table>
+<Row><Cell><Data ss:Type="String">date</Data></Cell><Cell><Data ss:Type="String">description</Data></Cell><Cell><Data ss:Type="String">amount</Data></Cell></Row>
+<Row><Cell><Data ss:Type="String">01.01.2024</Data></Cell><Cell><Data ss:Type="String">REDACTED MERCHANT</Data></Cell><Cell><Data ss:Type="Number">-89.01</Data></Cell></Row>
+</Table></Worksheet></Workbook>

@@ -19,7 +19,7 @@ vi.mock("../src/commands/accounts", () => ({
 vi.mock("../src/commands/cards", () => ({
   cmdListCards: vi.fn().mockResolvedValue([]),
   cmdCardBalance: vi.fn().mockResolvedValue({}),
-  cmdCardTransactions: vi.fn().mockResolvedValue([]),
+  cmdCardTransactions: vi.fn().mockResolvedValue(null),
 }))
 
 const cli = Command.run(command, { name: "nlbcli", version: "test" })
