@@ -12,6 +12,10 @@ const tbodyPattern = /<tbody>[\s\S]*<\/tbody>/
 const fixtures = new URL("./fixtures/cards/", import.meta.url)
 const page1 = fs.readFileSync(new URL("page-1.html", fixtures), "utf-8")
 const page2 = fs.readFileSync(new URL("page-2.html", fixtures), "utf-8")
+const live = fs.readFileSync(
+  new URL("live-transactions.html", fixtures),
+  "utf-8"
+)
 const empty = fs.readFileSync(new URL("empty.html", fixtures), "utf-8")
 const report = fs.readFileSync(new URL("report.xls", fixtures))
 const login = fs.readFileSync(
@@ -50,6 +54,28 @@ afterEach(() => {
 })
 
 describe("card transaction exports", () => {
+  test("exports every live-layout page with the bank's zero-based pager", async () => {
+    const first = `${live}<ul class="pagination"><li class="active"><a>1</a></li><li><a onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('CmsTransactionsForm', 'PageNumber', '1');">2</a></li></ul>`
+    const last = `${live.replace("REDACTED SHOP", "REDACTED SECOND SHOP")}<ul class="pagination"><li><a onclick="iBank.Forms.SetFormFieldValueAndSubmitForm('CmsTransactionsForm', 'PageNumber', '0');">1</a></li><li class="active"><a>2</a></li></ul>`
+    fetchMock.mockImplementation((_url, options) => {
+      const fields = new URLSearchParams(String(options?.body))
+      return Promise.resolve(
+        html(fields.get("PageNumber") === "0" ? first : last)
+      )
+    })
+    const output = path.join(directory, "live.csv")
+    await exportCards("csv", output)
+    expect(fs.readFileSync(output, "utf-8")).toBe(
+      "date,description,amount,currency\n2024-01-31,REDACTED SHOP,12.34,EUR\n2024-01-31,REDACTED SECOND SHOP,12.34,EUR\n"
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(
+      fetchMock.mock.calls.map(([, options]) =>
+        new URLSearchParams(String(options?.body)).get("PageNumber")
+      )
+    ).toEqual(["0", "1"])
+  })
+
   test.each([
     "tab",
     "csv",
@@ -84,7 +110,7 @@ describe("card transaction exports", () => {
         AccountID: card,
         DateFrom: start,
         DateTo: end,
-        PageNumber: String(index + 1),
+        PageNumber: String(index),
         PageSize: "20",
         Report: "",
       })
@@ -333,7 +359,7 @@ describe("card transaction exports", () => {
       new URLSearchParams(String(fetchMock.mock.calls[2][1]?.body)).get(
         "PageNumber"
       )
-    ).toBe("3")
+    ).toBe("2")
   })
 
   test("detects repeated pages instead of looping or duplicating results", async () => {

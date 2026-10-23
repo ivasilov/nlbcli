@@ -126,6 +126,13 @@ currency suffix (for example, `1.234,56 MKD`). JSON and CSV omit that suffix;
 tab output retains it. Malformed punctuation, malformed currency suffixes, and
 exponential notation fail validation.
 
+For card tables without a separate currency column, `currency` comes from the
+original amount's suffix. The card `date` is the transaction date, and `amount`
+is the original transaction amount; the booking date, domestic amount, and
+local-currency balance are not included in JSON/CSV.
+NLB applies card date-range filters to the booking date, so a matching purchase
+can have a transaction `date` outside the requested range.
+
 ## JSON and CSV encoding
 
 JSON is a UTF-8 array of objects with no envelope. Empty results are `[]`.

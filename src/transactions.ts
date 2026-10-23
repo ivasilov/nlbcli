@@ -110,6 +110,7 @@ function invalidTable(reason: string): Error {
 const aliases: Record<string, string> = {
   date: "date",
   датум: "date",
+  "датум на трансакција": "date",
   recipient: "recipient",
   otherpartyname: "recipient",
   примач: "recipient",
@@ -228,6 +229,7 @@ export function parseTransactions(
   )
   const jsonRows: TransactionRow[] = []
   const tabRows: string[][] = []
+  const embeddedCurrency = kind === "card" && !columns.includes("currency")
   table.find("tbody > tr").each((_i, tr) => {
     if (!tr.sourceCodeLocation?.endTag) {
       throw invalidTable("Malformed NLB transaction row")
@@ -254,6 +256,12 @@ export function parseTransactions(
         field,
         indexes[i] < 0 ? "" : values[indexes[i]]
       )
+    }
+    // Live card tables put the original currency in the amount cell rather
+    // than a separate column. Do not use the local-currency amount/balance.
+    if (embeddedCurrency) {
+      const amount = values[columns.indexOf("amount")] ?? ""
+      row.currency = amount.match(bankCurrencySuffix)?.[0].trim() ?? null
     }
     jsonRows.push(row)
     tabRows.push(
