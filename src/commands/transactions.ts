@@ -11,15 +11,16 @@ import {
 } from "../exports"
 import { formatCsv, formatJson, formatTab } from "../formatters"
 import { type HttpResponse, nlbPost } from "../http"
+import {
+  ACCOUNT_TRANSACTION_FIELDS,
+  CARD_TRANSACTION_FIELDS,
+  parseTransactions,
+  type TransactionData,
+} from "../transactions"
 
 export type TransactionsResult =
   | { kind: "file"; path: string; bytes: number }
-  | {
-      kind: "data"
-      headers: string[]
-      rows: string[][]
-      jsonRows: Record<string, string>[]
-    }
+  | TransactionData
   | null
 
 const datePattern = /^(\d{2})\.(\d{2})\.(\d{4})$/
@@ -37,7 +38,7 @@ function formatTransactionData(
   }
   return format === "csv"
     ? formatCsv(result.rows, result.headers)
-    : formatTab(result.rows)
+    : formatTab(result.tabRows)
 }
 
 export function printTransactionsResult(
@@ -52,6 +53,12 @@ export function printTransactionsResult(
   } else if (result.kind === "file") {
     console.error(`SAVED: ${result.path} (${result.bytes} bytes)`)
   } else {
+    if (result.rows.length === 0) {
+      console.error("No transactions found.")
+      if (format === "tab") {
+        return
+      }
+    }
     console.log(formatTransactionData(result, format))
   }
 }
@@ -147,7 +154,7 @@ function exportReport(
   const match = disposition.match(filenameRegex)
   const filename = path.basename(
     match
-      ? match[1].replace(/['"]/g, "")
+      ? match[1].replace(/['"]/g, "").replaceAll("\\", "/")
       : `transactions_${accountId.replaceAll("/", "_")}_${dateFmt(new Date())}.${format}`
   )
   const downloads = path.join(process.cwd(), "downloads")
@@ -155,76 +162,15 @@ function exportReport(
   return saveFile(path.join(downloads, filename), res.body, validate)
 }
 
-function cardHeaders(labels: string[], columnCount: number): string[] {
-  const used = new Set<string>()
-  return Array.from(
-    { length: Math.max(labels.length, columnCount) },
-    (_, i) => {
-      const label = labels[i] || `column_${i + 1}`
-      let header = label
-      for (let suffix = 2; used.has(header); suffix++) {
-        header = `${label}_${suffix}`
-      }
-      used.add(header)
-      return header
-    }
-  )
-}
-
 function parsePage(
-  html: string,
+  res: HttpResponse,
   account: boolean,
   currentPage: number,
   requestedPageSize: number
 ) {
-  const $ = load(html, { sourceCodeLocationInfo: true })
-  const invalid = () =>
-    bankResponseError(
-      "NLB did not return a valid transactions table (incomplete transaction table or document)."
-    )
-  // Cheerio repairs truncated HTML; require real closing tags before exporting.
-  for (const element of $("html, body").toArray()) {
-    const location = element.sourceCodeLocation
-    if (location?.startTag && !location.endTag) {
-      throw invalid()
-    }
-  }
-  const table = $("table")
-    .filter((_i, el) => $(el).find("tbody").length > 0)
-    .first()
-  if (!table.get(0)?.sourceCodeLocation?.endTag) {
-    throw invalid()
-  }
-  const columnHeaders = table
-    .find("thead th")
-    .map((_i, el) => $(el).text().trim())
-    .get()
-  const headers = account
-    ? ["date", "recipient", "description", "status", "amount", "fee", "balance"]
-    : []
-  const rows: string[][] = []
-  table.find("tbody > tr").each((_i, tr) => {
-    if (!tr.sourceCodeLocation?.endTag) {
-      throw invalid()
-    }
-    const cells = $(tr).children("td")
-    if (cells.length === 0 || cells.is("[colspan]")) {
-      return
-    }
-    const values = cells.map((_j, td) => $(td).text().trim()).get()
-    if (account) {
-      if (values.length < 8) {
-        throw invalid()
-      }
-      rows.push(values.slice(1, 8))
-    } else {
-      rows.push(values)
-    }
-  })
-  if (!account) {
-    headers.push(...cardHeaders(columnHeaders, rows[0]?.length ?? 0))
-  }
-  return { headers, rows, ...pagination($, currentPage, requestedPageSize) }
+  const parsed = parseTransactions(res, account ? "account" : "card")
+  const $ = load(res.body.toString("utf-8"))
+  return { ...parsed, ...pagination($, currentPage, requestedPageSize) }
 }
 
 function pagination(
@@ -290,25 +236,28 @@ export async function fetchTransactions(
   }
 
   const rows: string[][] = []
-  let headers: string[] = []
+  const tabRows: string[][] = []
+  const jsonRows: TransactionData["jsonRows"] = []
+  const headers = [
+    ...(endpoint === "/Retail/Transactions"
+      ? ACCOUNT_TRANSACTION_FIELDS
+      : CARD_TRANSACTION_FIELDS),
+  ]
   const seen = new Set<string>()
   for (let page = 1; ; page++) {
     request.PageNumber = String(page)
     const res = await nlbPost(endpoint, cookie, request)
     validateExportResponse(res)
     const parsed = parsePage(
-      res.body.toString("utf-8"),
+      res,
       endpoint === "/Retail/Transactions",
       page,
       Number(request.PageSize)
     )
-    if (page === 1) {
-      headers = parsed.headers
-    }
     if (parsed.rows.length === 0) {
       break
     }
-    const signature = JSON.stringify(parsed.rows)
+    const signature = JSON.stringify(parsed.tabRows)
     if (seen.has(signature)) {
       throw bankResponseError(
         "NLB repeated a transaction page; export is incomplete."
@@ -316,6 +265,8 @@ export async function fetchTransactions(
     }
     seen.add(signature)
     rows.push(...parsed.rows)
+    tabRows.push(...parsed.tabRows)
+    jsonRows.push(...parsed.jsonRows)
     if (
       parsed.nextDisabled ||
       (!parsed.hasNext && parsed.rows.length < parsed.pageSize)
@@ -323,10 +274,7 @@ export async function fetchTransactions(
       break
     }
   }
-  const jsonRows = rows.map((row) =>
-    Object.fromEntries(headers.map((header, i) => [header, row[i] ?? ""]))
-  )
-  const result = { kind: "data" as const, headers, rows, jsonRows }
+  const result = { kind: "data" as const, headers, rows, tabRows, jsonRows }
   if (output !== undefined) {
     return saveFile(
       output,
@@ -338,5 +286,5 @@ export async function fetchTransactions(
       }
     )
   }
-  return rows.length === 0 ? null : result
+  return result
 }

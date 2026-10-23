@@ -104,11 +104,11 @@ describe.each(["cards", "accounts"])("%s transaction CLI", (resource) => {
     if (format === "json") {
       const rows = JSON.parse(content)
       expect(rows).toHaveLength(resource === "cards" ? 3 : 2)
-      expect(rows[0].date).toBe("31.01.2024")
-      expect(rows.at(-1).date).toBe("01.01.2024")
+      expect(rows[0].date).toBe("2024-01-31")
+      expect(rows.at(-1).date).toBe("2024-01-01")
     } else {
-      expect(content).toContain("31.01.2024")
-      expect(content).toContain("01.01.2024")
+      expect(content).toContain(format === "csv" ? "2024-01-31" : "31.01.2024")
+      expect(content).toContain(format === "csv" ? "2024-01-01" : "01.01.2024")
       expect(content).toContain(format === "csv" ? "," : "\t")
     }
   })
@@ -153,9 +153,48 @@ describe.each(["cards", "accounts"])("%s transaction CLI", (resource) => {
     expect(console.error).toHaveBeenCalledWith("No transactions found.")
     if (format === "json") {
       expect(stdout).toHaveBeenCalledExactlyOnceWith("[]")
+    } else if (format === "csv") {
+      expect(stdout).toHaveBeenCalledExactlyOnceWith(
+        resource === "cards"
+          ? "date,description,amount,currency"
+          : "date,recipient,description,status,amount,fee,balance"
+      )
     } else {
       expect(stdout).not.toHaveBeenCalled()
     }
+  })
+
+  test.each([
+    "csv",
+    "json",
+  ])("a malformed later page preserves an existing %s export", async (format) => {
+    const output = path.join(directory, `existing.${format}`)
+    fs.writeFileSync(output, "previous export")
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response('<html><div id="main_Balances">REDACTED</div></html>')
+      )
+      .mockResolvedValueOnce(new Response(fixture(`${resource}/page-1.html`)))
+      .mockResolvedValueOnce(
+        new Response(
+          fixture(`${resource}/page-2.html`).replace("-89.01", "NaN")
+        )
+      )
+    expect(
+      await runExit(
+        resource,
+        "transactions",
+        id,
+        ...flags,
+        "--format",
+        format,
+        "--output",
+        output
+      )
+    ).toBe(EXIT_CODES.bankResponse)
+    expect(fs.readFileSync(output, "utf-8")).toBe("previous export")
+    expect(fs.readdirSync(directory)).toEqual([path.basename(output)])
+    expect(stdout).not.toHaveBeenCalled()
   })
 
   test.each([

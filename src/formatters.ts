@@ -21,7 +21,7 @@ export function formatCsv(rows: string[][], headers: string[]): string {
     .join("\n")
 }
 
-export function formatJson(rows: Record<string, string>[]): string {
+export function formatJson(rows: Record<string, string | null>[]): string {
   return JSON.stringify(rows, null, 2)
 }
 
@@ -33,6 +33,6 @@ export function printCsv(rows: string[][], headers: string[]): void {
   console.log(formatCsv(rows, headers))
 }
 
-export function printJson(rows: Record<string, string>[]): void {
+export function printJson(rows: Record<string, string | null>[]): void {
   console.log(formatJson(rows))
 }

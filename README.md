@@ -174,6 +174,12 @@ Exports are validated in a temporary file beside the destination, then atomicall
 
 Run `nlbcli --help` for all available commands and options.
 
+Account and card transactions support stable JSON and CSV exports. Dates use
+`YYYY-MM-DD`, monetary values are exact decimal **strings**, and missing values
+are `null` in JSON (empty cells in CSV). See the [v1 export contract and JSON
+Schemas](docs/transaction-exports.md) for field names, fixed CSV headers, examples,
+and compatibility rules.
+
 ## How it works
 
 Built with TypeScript using [Effect](https://effect.website/) for the CLI framework. Authentication goes through NLB Klik's push notification flow, then plain `fetch` requests with the saved session cookie handle all interactions. HTML responses are parsed with [Cheerio](https://cheerio.js.org/).

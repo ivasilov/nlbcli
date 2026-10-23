@@ -11,6 +11,8 @@ const loginForm =
 const loginJson =
   /["'](?:RedirectionUrl|RedirectUrl)["']\s*:\s*["'][^"']*\/Account\/Login/i
 const loginLocation = /\/Account\/Login/i
+const bankErrorPage =
+  /<[^>]+\b(?:id|class)\s*=\s*["'][^"']*(?:validation-summary-errors|error-page|errorPage)/i
 const htmlTag = /<[a-z][\s\S]*>/i
 export const TABLE_HTML = /<table\b/i
 // A balance page may have no accounts/cards. Accept its page marker or an
@@ -126,7 +128,12 @@ export function isAuthenticationResponse(res: HttpResponse): boolean {
 }
 
 export function requireHtml(res: HttpResponse, selector?: RegExp): string {
+  validateStatus(res)
+  validateResponse(res)
   const html = res.body.toString("utf-8")
+  if (bankErrorPage.test(html)) {
+    throw bankResponseError("NLB returned an error page.")
+  }
   if (!htmlTag.test(html) || (selector && !selector.test(html))) {
     throw bankResponseError(
       "NLB returned an unrecognized page. Try again or log in again."

@@ -22,7 +22,18 @@ export const rows = [
     "9,876.50",
   ],
 ]
-export const jsonRows = rows.map((row) =>
+export const normalizedRows = [
+  [
+    "2026-08-01",
+    'Примач, "Example"',
+    'Payment, "quoted"\nsecond line',
+    "Completed",
+    "1234.50",
+    "0.00",
+    "9876.50",
+  ],
+]
+export const jsonRows = normalizedRows.map((row) =>
   Object.fromEntries(headers.map((key, i) => [key, row[i]]))
 )
 

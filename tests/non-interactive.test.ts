@@ -46,6 +46,11 @@ function bankPage(url: string | URL): Response {
       `<form id="main_CmsAccountBalanceForm"><div class="col-lg-12"><div class="col-lg-8"><div class="row">${cells}</div></div></div></form>`
     )
   }
+  if (pathname === "/Cms/Transactions") {
+    return new Response(
+      "<table><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Currency</th></tr></thead><tbody><tr><td>01.10.2026</td><td>Payment</td><td>100</td><td>MKD</td></tr></tbody></table>"
+    )
+  }
   return new Response(rows)
 }
 

@@ -67,10 +67,10 @@ describe("card transaction exports", () => {
       throw new Error("Expected parsed transactions")
     }
     expect(result.rows).toHaveLength(3)
-    expect(result.rows[0][0]).toBe(end)
-    expect(result.rows[2][0]).toBe(start)
+    expect(result.rows[0][0]).toBe("2024-01-31")
+    expect(result.rows[2][0]).toBe("2024-01-01")
     expect(result.jsonRows[0]).toEqual({
-      date: end,
+      date: "2024-01-31",
       description: 'REDACTED "SHOP", SKOPJE',
       amount: "-123.45",
       currency: "MKD",
@@ -109,10 +109,10 @@ describe("card transaction exports", () => {
     })
     if (format === "json") {
       expect(JSON.parse(content)).toHaveLength(3)
-      expect(JSON.parse(content)[2].date).toBe(start)
+      expect(JSON.parse(content)[2].date).toBe("2024-01-01")
     } else if (format === "csv") {
       expect(content).toBe(
-        'date,description,amount,currency\n31.01.2024,"REDACTED ""SHOP"", SKOPJE",-123.45,MKD\n15.01.2024,REDACTED REFUND,45.67,MKD\n01.01.2024,REDACTED MERCHANT,-89.01,MKD\n'
+        'date,description,amount,currency\n2024-01-31,"REDACTED ""SHOP"", SKOPJE",-123.45,MKD\n2024-01-15,REDACTED REFUND,45.67,MKD\n2024-01-01,REDACTED MERCHANT,-89.01,MKD\n'
       )
     } else {
       expect(content).toContain(`${start}\tREDACTED MERCHANT\t-89.01\tMKD\n`)
@@ -216,7 +216,7 @@ describe("card transaction exports", () => {
         "29.02.2024",
         "json"
       )
-    ).toBeNull()
+    ).toMatchObject({ kind: "data", jsonRows: [] })
     expect(String(fetchMock.mock.calls[0][1]?.body)).toContain(
       "DateFrom=29.02.2024&DateTo=29.02.2024"
     )
@@ -237,7 +237,10 @@ describe("card transaction exports", () => {
     "json",
   ])("returns no data for an empty %s result", async (format) => {
     fetchMock.mockResolvedValueOnce(html(empty))
-    expect(await exportCards(format)).toBeNull()
+    expect(await exportCards(format)).toMatchObject({
+      kind: "data",
+      jsonRows: [],
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -367,30 +370,21 @@ describe("card transaction exports", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  test("keeps unnamed and duplicate card columns in JSON", async () => {
+  test("rejects ambiguous card headings rather than deriving unstable keys", async () => {
     const table = page2
       .replace("<th>date</th>", "<th>amount</th>")
       .replace("<th>currency</th>", "<th></th>")
     fetchMock.mockResolvedValueOnce(html(table))
-    const result = await exportCards()
-    expect(result?.kind === "data" && result.jsonRows[0]).toEqual({
-      amount: start,
-      description: "REDACTED MERCHANT",
-      amount_2: "-89.01",
-      column_4: "MKD",
-    })
+    await expect(exportCards()).rejects.toThrow("valid transactions table")
   })
 
-  test("retains all columns when card table headings are absent", async () => {
+  test("rejects data without recognizable card headings", async () => {
     fetchMock.mockResolvedValueOnce(
       html(
         "<table><tbody><tr><td>REDACTED</td><td>-1.00</td></tr></tbody></table>"
       )
     )
-    const result = await exportCards()
-    expect(result?.kind === "data" && result.jsonRows).toEqual([
-      { column_1: "REDACTED", column_2: "-1.00" },
-    ])
+    await expect(exportCards()).rejects.toThrow("valid transactions table")
   })
 
   test.each([
@@ -398,7 +392,7 @@ describe("card transaction exports", () => {
     "<table><thead><tr><th>date</th></tr></thead><tbody></tbody></table>",
   ])("handles an empty table without a placeholder row", async (table) => {
     fetchMock.mockResolvedValueOnce(html(table))
-    expect(await exportCards()).toBeNull()
+    expect(await exportCards()).toMatchObject({ kind: "data", jsonRows: [] })
   })
 
   test("uses the server's page size when deciding whether to fetch more", async () => {

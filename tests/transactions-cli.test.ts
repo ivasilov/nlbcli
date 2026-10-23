@@ -11,9 +11,11 @@ import {
   expect,
   test,
 } from "vitest"
+import packageJson from "../package.json"
 import {
   headers,
   jsonRows,
+  normalizedRows,
   readTransactionExport,
   rows,
   transactionHtml,
@@ -71,7 +73,12 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(directory, { recursive: true, force: true }))
 afterAll(() => fs.rmSync(buildDirectory, { recursive: true, force: true }))
 
-function runCli(format: string, body: Buffer | string, output?: string) {
+function runCli(
+  format: string,
+  body: Buffer | string,
+  output?: string,
+  timezone = "UTC"
+) {
   const args = [
     "--import",
     preload,
@@ -92,6 +99,8 @@ function runCli(format: string, body: Buffer | string, output?: string) {
       HOME: directory,
       NLB_TEST_BODY: Buffer.from(body).toString("base64"),
       NO_COLOR: "1",
+      TZ: timezone,
+      LANG: "mk_MK.UTF-8",
     },
     encoding: "utf-8",
   })
@@ -119,7 +128,9 @@ test.each([
   ])
   const contents = fs.readFileSync(path.join(directory, output))
   expect(readTransactionExport(format, contents)).toEqual(
-    format === "json" ? jsonRows : [headers, ...rows]
+    format === "json"
+      ? jsonRows
+      : [headers, ...(format === "csv" ? normalizedRows : rows)]
   )
 })
 
@@ -155,4 +166,22 @@ test.each([
   } else {
     expect(result.stdout).toContain(`${headers.join(",")}\n`)
   }
+})
+
+test("bundled version matches package metadata outside the repository", () => {
+  const result = spawnSync(process.execPath, [cli, "--version"], {
+    cwd: directory,
+    encoding: "utf-8",
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(result.stdout.trim()).toBe(packageJson.version)
+})
+
+test("JSON export is identical across host timezones", () => {
+  const utc = runCli("json", transactionHtml(), undefined, "UTC")
+  const other = runCli("json", transactionHtml(), undefined, "Pacific/Auckland")
+  expect(utc.status, utc.stderr).toBe(0)
+  expect(other.status, other.stderr).toBe(0)
+  expect(other.stdout).toBe(utc.stdout)
+  expect(JSON.parse(utc.stdout)).toEqual(jsonRows)
 })
