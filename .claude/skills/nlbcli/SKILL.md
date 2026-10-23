@@ -1,120 +1,73 @@
 ---
 name: nlbcli
-description: Work with the NLB CLI tool for interacting with NLB bank accounts, cards, and payments. Use when the user wants to check balances, list transactions, manage accounts or cards, create or send payment orders, authenticate, or troubleshoot issues with nlbklik.com.mk.
+description: Use for NLB Klik account and card balances, transaction exports, pending reservations, payment orders, login, and CLI or session troubleshooting for nlbklik.com.mk.
 ---
 
-# NLB Tutunska CLI
+# NLB Klik CLI
 
-`nlbcli` is a CLI for interacting with NLB Tutunska (nlbklik.com.mk) internet banking. Use it to check account balances, list transactions, view card details, and create or send PP30, PP50, and PP53 payment orders.
+Use `nlbcli` to read NLB Klik banking data and create or send PP30, PP50, and PP53 payment orders. Follow the shared setup, then the workflow for the user's request.
 
-## Prerequisites
+## Select the profile
 
-- The CLI must be installed and available as `nlbcli` in the user's PATH
-- The user must have an NLB Klik account with push notification authentication enabled on their phone
-- Session is stored at `~/.nlbcli/profiles/<profile>/session.json` (`default` when `--profile` is omitted) — if commands fail with session errors, the user needs to re-authenticate in that profile
+1. Check that `nlbcli` is available. If it is missing, install it with `npm install --global nlbcli` (Node.js >= 18 is required).
+2. Use the user's selected profile throughout the task. Put `--profile <PROFILE>` before the command; omit it only to use `default`. Each profile has its own session and saved username, with no fallback to another profile.
+3. For command options, consult the installed CLI with `<command> --help`, such as `nlbcli cards transactions --help`. Choose the data-read or payment workflow below before running a bank command.
 
-## Authentication
+## Read accounts and cards
 
-Before using any commands, the user must log in:
+1. Add `--non-interactive` to every data read so it uses only the saved session and returns without prompting or requesting push approval. Discover IDs in the selected profile when needed:
 
-```
-nlbcli login [--username <user>]
-```
+   ```sh
+   nlbcli --profile <PROFILE> --non-interactive accounts list
+   nlbcli --profile <PROFILE> --non-interactive cards list
+   ```
 
-This triggers a push notification to the user's phone. The CLI waits up to 120 seconds for approval. Once authenticated, the session cookie is saved and reused for subsequent commands.
+2. Run the requested read with an ID from that profile. For all account balances, run the balance command for each account returned by `accounts list`:
 
-For multiple logins, put `--profile <profile>` before the command, for example `nlbcli --profile work login --username <user>`, `nlbcli --profile work accounts transactions <id>`, or `nlbcli --profile work cards transactions <id>`. Use the same profile for all commands for that login. Profile names start with an ASCII letter or digit and contain only ASCII letters, digits, dots, underscores, or hyphens. Each profile has its own session and saved username; expired sessions re-authenticate within that profile. The old shared `~/.nlbcli/cookies.json` is no longer read, so log in again after upgrading.
+   ```sh
+   nlbcli --profile <PROFILE> --non-interactive accounts balance <ACCOUNT_ID> --format json
+   nlbcli --profile <PROFILE> --non-interactive accounts reservations <ACCOUNT_ID>
+   nlbcli --profile <PROFILE> --non-interactive cards balance <CARD_ID>
+   ```
 
-If a command fails due to an expired session (HTTP 302 redirect), ask the user to run `nlbcli --profile <profile> login` again using the selected profile.
+   For transactions, use `accounts transactions <ACCOUNT_ID>` or `cards transactions <CARD_ID>`. Prefer `--format json` for processing data. Both accept `--start` and `--end` in `dd.mm.yyyy`; omitted bounds default to 30 days ago and today. Account transactions also support `--name` and `--type in|out`.
 
-For scripts or agent data reads, add the global `--non-interactive` option, for example `nlbcli --profile work --non-interactive accounts balance <id> --format json`. This uses only that profile's saved session and never prompts or waits for push approval. A missing or expired session exits with code `3` and prints the profile's login command to stderr; run that login interactively before retrying. Other exit codes are `2` for invalid arguments, `4` for network failures/timeouts, `5` for invalid bank responses, and `1` for unexpected local/runtime errors. Progress and errors go to stderr; data goes to stdout. Do not combine `--non-interactive` with `login` or `--wizard`.
+3. Check the exit code before interpreting stdout. Data is on stdout; progress and errors are on stderr. A valid empty transaction array (`[]`) is a successful result. Report the selected profile, date range when relevant, and requested findings or saved export path.
 
-## Available commands
+### Export transactions
 
-```
-nlbcli login [--username <user>]           # Authenticate via push notification
-nlbcli accounts list                       # List account IDs
-nlbcli accounts balance <id> [--format]    # Show account balance
-nlbcli accounts transactions <id> [opts]   # List transactions (--start, --end, --format, --type, --name)
-nlbcli accounts reservations <id>          # List pending reservations
-nlbcli cards list                          # List card IDs
-nlbcli cards balance <id>                  # Show card balance/details
-nlbcli cards transactions <id>             # List card transactions
-nlbcli payments create <type> [opts]       # Validate and save a payment order
-nlbcli payments send <type> [opts]         # Review, sign, and submit a payment
-```
+Choose JSON or CSV for structured data, XLS for a bank report, or PDF for an **account** bank report. Transactions default to `tab`. Account balances accept `tab`, `csv`, or `json`; lists, reservations, and card balances print text without a format option.
 
-Payment types are `pp30`, `pp50`, and `pp53`. All require `--source`.
+Both transaction commands collect all pages for tab/JSON/CSV and accept `--output <PATH>`. Ensure the parent directory exists. Without `--output`, text goes to stdout and reports go to `./downloads/`; save confirmations go to stderr. Failed exports preserve any existing destination.
 
-- PP30 also requires `--destination`, `--amount`, and `--purpose-code`.
-- PP50 also requires `--destination` and `--amount`; its income-code and
-  payee/budgetary account flags are optional.
-- PP53 also requires `--folio`; NLB resolves its total and number of orders.
-- External or unknown destination accounts require `--recipient-name` and
-  `--recipient-address`.
-- `--date` defaults to today. Use `--urgent` to request MIPS.
+JSON/CSV transaction dates use `YYYY-MM-DD`, monetary values are exact decimal strings, and missing values are `null` in JSON or empty CSV cells. Preserve monetary precision when processing them. For field names, fixed headers, schemas, or compatibility questions, read the [v1 export contract](https://github.com/ivasilov/nlbcli/blob/master/docs/transaction-exports.md).
 
-`payments send` always prints the resolved payment and requires the user to type
-`SEND` in an interactive terminal. Never attempt to bypass that confirmation.
-The user must approve the authorization in mKlik. If the CLI reports an unknown
-or timed-out result, do not retry; ask the user to verify the order in NLB Klik
-first.
+## Recover a failed command
 
-## Output formats
+| Exit code | Next action |
+| --- | --- |
+| `3` — authentication | Have the user run the login command printed on stderr interactively, approve the phone notification, then retry the data read in the same profile. |
+| `2` — arguments | Correct the arguments using that command's `--help`; validate dates and the output directory. |
+| `4` — network | Report the failure. A read may be retried; a payment requires the outcome check below first. |
+| `5` — bank response | Report the bank response error. For a payment, inspect its status and verify the order before considering another attempt. |
+| `1` — local/runtime | Report the diagnostic and resolve the local cause before retrying. |
 
-Use `--format` to control output:
+Login takes the form `nlbcli --profile <PROFILE> login --username <USERNAME>` and waits up to 120 seconds for push approval. Use the saved username from the printed instruction when available. Run login without `--non-interactive`; the CLI also rejects that flag with `--wizard` or `payments send`.
 
-- `tab` (default for balance) — tab-separated
-- `csv` — comma-separated with proper escaping
-- `json` — pretty-printed JSON, best for programmatic use by Claude
-- `xls` (default for transactions) — downloads Excel file to `./downloads/`
-- `pdf` — downloads PDF file to `./downloads/`
+For an invalid account/card ID, rediscover IDs with the corresponding list command. Treat valid empty transaction results as empty data, and check the requested range and filters when the result is unexpected.
 
-When running commands to process the data further, prefer `--format json` for structured output.
+## Create or send a payment
 
-## Common workflows
+Payments are experimental and write bank state. `create` saves an unsigned order; `send` creates, signs, and submits an order. Choose one operation for the user's intent: running `send` after `create` starts another order rather than signing the saved draft.
 
-### Check all account balances
+1. Establish whether the user wants an unsigned order or explicitly wants to submit a payment. Gather the source account and the fields for the chosen type. Use `nlbcli payments create --help` or `nlbcli payments send --help` for available flags:
+   - PP30 requires destination, MKD amount, and purpose code.
+   - PP50 requires destination and MKD amount; NLB can derive the income code/program from a supplied payee or budgetary account.
+   - PP53 requires a folio number; NLB resolves its total and number of orders.
+   - External or unknown destinations require recipient name and address.
 
-1. Run `nlbcli accounts list` to get account IDs
-2. For each account, run `nlbcli accounts balance <id> --format json`
+2. Execute the chosen operation in the selected profile. For `send`, use an interactive terminal and leave the displayed review and `SEND` confirmation to the user. Never bypass that confirmation. The user completes authorization in mKlik.
 
-### Get recent transactions
+3. Read the `STATUS`, order ID when present, and message. Report an unsigned draft as saved, a cancellation as cancelled, and pending authorization as pending. Stay with the user through the CLI's authorization result; have them verify the final payment status in NLB Klik.
 
-```
-nlbcli accounts transactions <id> --start <dd.mm.yyyy> --end <dd.mm.yyyy> --format json
-```
-
-Dates use `dd.mm.yyyy` format (e.g., `01.03.2026`).
-
-### Filter transactions
-
-Use `--type` to filter by transaction type and `--name` to filter by name/description.
-
-### Check card details
-
-1. Run `nlbcli cards list` to get card IDs
-2. Run `nlbcli cards balance <id>` for card details
-3. Run `nlbcli cards transactions <id>` for card transaction history
-
-### Create or send a PP30 payment
-
-```
-nlbcli payments create pp30 \
-  --source <account-id> \
-  --destination <recipient-account> \
-  --amount <mkd-amount> \
-  --purpose-code <code>
-```
-
-Use `payments send` instead of `payments create` only when the user explicitly
-wants to submit the payment. Stay with the user through the interactive review
-and mKlik authorization result.
-
-## Troubleshooting
-
-- **Session expired**: Run `nlbcli --profile <profile> login` to re-authenticate in the selected profile
-- **Command not found**: Ensure `nlbcli` is installed and in PATH
-- **No data returned**: The account/card ID may be incorrect — verify with `accounts list` or `cards list`
-- **Payment status unknown**: Do not retry — verify the order in NLB Klik first
-- **Recipient details required**: Add `--recipient-name` and `--recipient-address` for an external account
+**Unknown outcome:** after an unknown result, authorization timeout, or network failure during either create or send, stop payment attempts and have the user verify the order in NLB Klik before any retry. An error exit code alone does not prove that no order was created.
