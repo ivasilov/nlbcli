@@ -121,8 +121,10 @@ are decimal amounts.
 Normalization removes a leading plus and redundant integer zeros, and normalizes
 Unicode minus and negative zero. An ungrouped integer stays an integer string.
 Amount signs are preserved; neither direction nor currency is inferred.
-Malformed punctuation, currency suffixes, and exponential notation fail
-validation.
+Bank table amounts may include a whitespace-separated, uppercase three-letter
+currency suffix (for example, `1.234,56 MKD`). JSON and CSV omit that suffix;
+tab output retains it. Malformed punctuation, malformed currency suffixes, and
+exponential notation fail validation.
 
 ## JSON and CSV encoding
 
@@ -141,6 +143,9 @@ Invalid dates or amounts fail the whole export. Unsupported layouts and
 truncated rows also fail; rows are never silently dropped or partially exported.
 HTTP errors, redirects, login forms, and recognized error pages are errors,
 including when they contain no transaction rows.
+Account responses that identify a different account also fail rather than
+exporting another account's history. Savings accounts use a separate bank
+endpoint and are not currently supported by the account transaction command.
 
 Both transaction commands collect all pages for JSON/CSV exports. Stdout contains
 only data; errors and session progress go to stderr, and failures exit nonzero.

@@ -25,6 +25,7 @@ const session = JSON.parse(fixture("session.json")) as {
   username: string
 }
 const login = fixture("login.html")
+const pagerPattern = /<ul[\s\S]*<\/ul>/
 let directory: string
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>
 let stdout: ReturnType<typeof vi.spyOn<typeof console, "log">>
@@ -290,6 +291,106 @@ test("account filters are retained across every page", async () => {
       OtherPartyName: "REDACTED",
     })
   }
+})
+
+test("account transactions start at bank page zero instead of returning a false empty result", async () => {
+  const requested: string[] = []
+  fetchMock.mockImplementation((url, options) => {
+    if (new URL(String(url)).pathname === "/Home/Balances") {
+      return Promise.resolve(new Response('<div id="main_Balances"></div>'))
+    }
+    const page =
+      new URLSearchParams(String(options?.body)).get("PageNumber") ?? ""
+    requested.push(page)
+    return Promise.resolve(
+      new Response(
+        page === "0"
+          ? fixture("accounts/page-1.html").replace(pagerPattern, "")
+          : fixture("no-data-transactions.html")
+      )
+    )
+  })
+  expect(
+    await runExit(
+      "accounts",
+      "transactions",
+      "account-id",
+      "--non-interactive",
+      "--format",
+      "json"
+    )
+  ).toBe(EXIT_CODES.success)
+  expect(
+    JSON.parse(stdout.mock.calls.map(([line]) => line).join(""))
+  ).toHaveLength(1)
+  expect(requested).toEqual(["0"])
+})
+
+test("account transactions follow the bank's zero-based pager even for short pages", async () => {
+  const requested: number[] = []
+  fetchMock.mockImplementation((url, options) => {
+    if (new URL(String(url)).pathname === "/Home/Balances") {
+      return Promise.resolve(new Response('<div id="main_Balances"></div>'))
+    }
+    const page = Number(
+      new URLSearchParams(String(options?.body)).get("PageNumber")
+    )
+    requested.push(page)
+    return Promise.resolve(
+      new Response(
+        page < 3
+          ? fixture("accounts/live-transactions.html").replace(
+              "31.01.2024",
+              `${31 - page}.01.2024`
+            )
+          : fixture("no-data-transactions.html")
+      )
+    )
+  })
+  expect(
+    await runExit(
+      "accounts",
+      "transactions",
+      "account-id",
+      "--non-interactive",
+      "--format",
+      "json"
+    )
+  ).toBe(EXIT_CODES.success)
+  expect(
+    JSON.parse(stdout.mock.calls.map(([line]) => line).join(""))
+  ).toHaveLength(3)
+  expect(requested).toEqual([0, 1, 2])
+})
+
+test.each([
+  ["accounts/page-1.html", "000-0000000001-00MKD"],
+  ["no-data-transactions.html", "000-0000000001-00MKD"],
+  ["accounts/page-1.html", ""],
+  ["no-data-transactions.html", ""],
+])("rejects a bank response without the requested account (%s, %j)", async (response, returnedAccount) => {
+  fetchMock
+    .mockResolvedValueOnce(new Response('<div id="main_Balances"></div>'))
+    .mockResolvedValueOnce(
+      new Response(
+        `<h4 class="widget-title"><strong>${returnedAccount}</strong></h4>` +
+          fixture(response)
+      )
+    )
+  expect(
+    await runExit(
+      "accounts",
+      "transactions",
+      "000-0000000000-00MKD",
+      "--non-interactive",
+      "--format",
+      "json"
+    )
+  ).toBe(EXIT_CODES.bankResponse)
+  expect(stdout).not.toHaveBeenCalled()
+  expect(console.error).toHaveBeenCalledWith(
+    expect.stringContaining("different account")
+  )
 })
 
 test("interactive reauthentication saves the replacement session to the selected profile", async () => {

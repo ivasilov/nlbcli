@@ -27,6 +27,8 @@ const datePattern = /^(\d{2})\.(\d{2})\.(\d{4})$/
 const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/
 const defaultPageSize = 100
 const pageLinkPattern = /(?:PageNumber|page)[=('/\s]+(\d+)/i
+const bankPageLinkPattern =
+  /SetFormFieldValueAndSubmitForm\([^,]+,\s*["']PageNumber["'],\s*["'](\d+)["']/
 export const cardTransactionFormats = ["tab", "csv", "json", "xls"]
 
 function formatTransactionData(
@@ -166,10 +168,22 @@ function parsePage(
   res: HttpResponse,
   account: boolean,
   currentPage: number,
-  requestedPageSize: number
+  requestedPageSize: number,
+  expectedAccountId: string
 ) {
-  const parsed = parseTransactions(res, account ? "account" : "card")
   const $ = load(res.body.toString("utf-8"))
+  const accountTitle = $(".widget-title").first()
+  const returnedAccount = accountTitle.find("strong").first().text().trim()
+  if (
+    account &&
+    accountTitle.length > 0 &&
+    returnedAccount !== expectedAccountId
+  ) {
+    throw bankResponseError(
+      "NLB returned transactions for a different account. The requested account type may not be supported."
+    )
+  }
+  const parsed = parseTransactions(res, account ? "account" : "card")
   return { ...parsed, ...pagination($, currentPage, requestedPageSize) }
 }
 
@@ -195,6 +209,11 @@ function pagination(
   )
     .map((_i, el) => {
       const link = $(el)
+      const bankPage = link.attr("onclick")?.match(bankPageLinkPattern)
+      // The bank's form values are zero-based; page labels are one-based.
+      if (bankPage) {
+        return Number(bankPage[1]) + 1
+      }
       return (
         Number(
           link.attr("data-page") ||
@@ -227,7 +246,7 @@ export async function fetchTransactions(
   const request: Record<string, string> = {
     ...data,
     PageSize: data.PageSize || String(defaultPageSize),
-    PageNumber: "1",
+    PageNumber: endpoint === "/Retail/Transactions" ? "0" : "1",
   }
   if (["xls", "pdf"].includes(format)) {
     request.Report = format === "xls" ? "Excel" : "Pdf"
@@ -245,14 +264,17 @@ export async function fetchTransactions(
   ]
   const seen = new Set<string>()
   for (let page = 1; ; page++) {
-    request.PageNumber = String(page)
+    request.PageNumber = String(
+      endpoint === "/Retail/Transactions" ? page - 1 : page
+    )
     const res = await nlbPost(endpoint, cookie, request)
     validateExportResponse(res)
     const parsed = parsePage(
       res,
       endpoint === "/Retail/Transactions",
       page,
-      Number(request.PageSize)
+      Number(request.PageSize),
+      data.AccountID
     )
     if (parsed.rows.length === 0) {
       break
