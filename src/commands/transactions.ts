@@ -246,7 +246,7 @@ export async function fetchTransactions(
   const request: Record<string, string> = {
     ...data,
     PageSize: data.PageSize || String(defaultPageSize),
-    PageNumber: endpoint === "/Retail/Transactions" ? "0" : "1",
+    PageNumber: "0",
   }
   if (["xls", "pdf"].includes(format)) {
     request.Report = format === "xls" ? "Excel" : "Pdf"
@@ -264,9 +264,7 @@ export async function fetchTransactions(
   ]
   const seen = new Set<string>()
   for (let page = 1; ; page++) {
-    request.PageNumber = String(
-      endpoint === "/Retail/Transactions" ? page - 1 : page
-    )
+    request.PageNumber = String(page - 1)
     const res = await nlbPost(endpoint, cookie, request)
     validateExportResponse(res)
     const parsed = parsePage(

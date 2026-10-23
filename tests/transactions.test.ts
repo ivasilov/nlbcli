@@ -84,6 +84,29 @@ describe("transaction values", () => {
 })
 
 describe("transaction pages", () => {
+  test("parses the live card layout using transaction date and original currency", () => {
+    const result = parseTransactions(
+      page("cards/live-transactions.html"),
+      "card"
+    )
+    expect(result.jsonRows).toEqual([
+      {
+        date: "2024-01-31",
+        description: "REDACTED SHOP",
+        amount: "12.34",
+        currency: "EUR",
+      },
+    ])
+    expect(result.tabRows[0]).toEqual([
+      "31.01.2024",
+      "01.02.2024",
+      "REDACTED SHOP",
+      "12,34 EUR",
+      "758,91 MKD",
+      "9.007.199.254.740.993,01 MKD",
+    ])
+  })
+
   test.each([
     "MKD",
     "EUR",
