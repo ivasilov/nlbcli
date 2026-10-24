@@ -105,6 +105,10 @@ Exports are validated in a temporary file beside the destination, then atomicall
 
 When NLB returns an HTML wrapper for an XLS or PDF report, the CLI downloads the file from the wrapper's bank report URL and validates that file before saving it.
 
+Before requesting an XLS report, the CLI checks the first transaction page using the same account/card, date range, and filters. If there are no matching transactions, it prints `No transactions found.`, exits successfully, and skips the report request. No file or downloads directory is created, and an existing output file is preserved. This avoids NLB's report error for empty periods.
+
+Bank report availability can vary by account/card and date range. If report generation or download returns an HTTP 5xx error, the CLI reports the failed format and HTTP status, exits with code `5`, and suggests `--format tab`, `csv`, or `json`. The response alone cannot distinguish an unsupported report from a temporary bank failure. No report is saved, and an existing output file is preserved.
+
 Account and card JSON/CSV transactions follow a stable contract: dates use `YYYY-MM-DD`, monetary values are exact decimal **strings**, and missing values are `null` in JSON or empty cells in CSV. Empty results are `[]` in JSON and headers only in CSV. Use decimal arithmetic when calculating monetary totals to preserve precision.
 
 When building an importer, validating exports, or handling bank value normalization, read the [v1 transaction export contract](docs/transaction-exports.md). It defines account and card fields, exact CSV headers, JSON Schemas and examples, normalization rules, validation guarantees, and version compatibility.

@@ -42,8 +42,9 @@ beforeAll(async () => {
   fs.writeFileSync(
     preload,
     `
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, options) => {
   if (new URL(url).pathname === "/Home/Balances") return new Response('<html><div id="main_Balances">Saved session</div></html>');
+  if (process.env.NLB_TEST_FORMAT === "xls" && new URLSearchParams(options?.body).get("Report") === "") return new Response(Buffer.from(process.env.NLB_TEST_PREFLIGHT, "base64"));
   return new Response(Buffer.from(process.env.NLB_TEST_BODY, "base64"), {
     headers: { "content-disposition": 'attachment; filename="bank-name.xls"' }
   });
@@ -98,6 +99,10 @@ function runCli(
       ...process.env,
       HOME: directory,
       NLB_TEST_BODY: Buffer.from(body).toString("base64"),
+      NLB_TEST_FORMAT: format,
+      NLB_TEST_PREFLIGHT: Buffer.from(
+        Buffer.isBuffer(body) ? transactionHtml() : body
+      ).toString("base64"),
       NO_COLOR: "1",
       TZ: timezone,
       LANG: "mk_MK.UTF-8",

@@ -1,6 +1,7 @@
 import { BASE_URL } from "./constants"
 import {
   authenticationError,
+  BankHttpError,
   bankResponseError,
   CliError,
   EXIT_CODES,
@@ -74,9 +75,7 @@ export async function bankFetch(
     throw authenticationError()
   }
   if (response.status >= 400) {
-    throw bankResponseError(
-      `NLB returned an invalid response (HTTP ${response.status}).`
-    )
+    throw new BankHttpError(response.status)
   }
   return response
 }
@@ -107,9 +106,7 @@ function validateStatus(res: Pick<HttpResponse, "status" | "headers">): void {
     throw authenticationError()
   }
   if (res.status < 200 || res.status >= 300) {
-    throw bankResponseError(
-      `NLB returned an invalid response (HTTP ${res.status}).`
-    )
+    throw new BankHttpError(res.status)
   }
 }
 

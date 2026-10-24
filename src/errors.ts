@@ -17,6 +17,18 @@ export class CliError extends Error {
   }
 }
 
+export class BankHttpError extends CliError {
+  readonly status: number
+
+  constructor(status: number) {
+    super(
+      EXIT_CODES.bankResponse,
+      `NLB returned an invalid response (HTTP ${status}).`
+    )
+    this.status = status
+  }
+}
+
 export function authenticationError(
   profile = "default",
   username?: string

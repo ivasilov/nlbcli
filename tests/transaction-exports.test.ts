@@ -88,6 +88,86 @@ describe.each(["cards", "accounts"])("%s transaction CLI", (resource) => {
   }
 
   test.each([
+    "default",
+    "new",
+    "existing",
+  ])("skips an empty XLS report successfully (%s destination)", async (destination) => {
+    mockPages(true)
+    vi.spyOn(process, "cwd").mockReturnValue(directory)
+    const output = path.join(directory, "empty.xls")
+    if (destination === "existing") {
+      fs.writeFileSync(output, "previous export")
+    }
+
+    expect(
+      await runExit(
+        resource,
+        "transactions",
+        id,
+        ...flags,
+        "--format",
+        "xls",
+        ...(destination === "default" ? [] : ["--output", output])
+      )
+    ).toBe(EXIT_CODES.success)
+    expect(stdout).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith("No transactions found.")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fs.readdirSync(directory)).toEqual(
+      destination === "existing" ? ["empty.xls"] : []
+    )
+    if (destination === "existing") {
+      expect(fs.readFileSync(output, "utf-8")).toBe("previous export")
+    }
+  })
+
+  test.each([
+    "request",
+    "download",
+  ])("reports an actionable XLS error when the bank fails during %s", async (stage) => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('<html><div id="main_Balances">REDACTED</div></html>')
+    )
+    fetchMock.mockResolvedValueOnce(
+      new Response(fixture(`${resource}/page-1.html`))
+    )
+    if (stage === "download") {
+      const area = resource === "accounts" ? "Retail" : "Cms"
+      fetchMock.mockResolvedValueOnce(
+        new Response(`<iframe src="/${area}/RenderReport/test"></iframe>`)
+      )
+    }
+    fetchMock.mockResolvedValueOnce(new Response("failure", { status: 500 }))
+    const output = path.join(directory, "transactions.xls")
+
+    expect(
+      await runExit(
+        resource,
+        "transactions",
+        id,
+        "--non-interactive",
+        "--start",
+        "01.09.2026",
+        "--end",
+        "30.09.2026",
+        "--format",
+        "xls",
+        "--output",
+        output
+      )
+    ).toBe(EXIT_CODES.bankResponse)
+    expect(stdout).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("HTTP 500")
+    )
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Try --format tab, csv, or json.")
+    )
+    expect(fs.readdirSync(directory)).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(stage === "request" ? 3 : 4)
+  })
+
+  test.each([
     "tab",
     "csv",
     "json",
@@ -118,6 +198,9 @@ describe.each(["cards", "accounts"])("%s transaction CLI", (resource) => {
     if (format === "xls") {
       fetchMock.mockResolvedValueOnce(
         new Response('<html><div id="main_Balances">REDACTED</div></html>')
+      )
+      fetchMock.mockResolvedValueOnce(
+        new Response(fixture(`${resource}/page-1.html`))
       )
       fetchMock.mockResolvedValueOnce(
         new Response(fixture("cards/report.xls"), {

@@ -2,7 +2,12 @@ import fs from "node:fs"
 import path from "node:path"
 import { load } from "cheerio"
 import { BASE_URL, dateFmt } from "../constants"
-import { bankResponseError, CliError, EXIT_CODES } from "../errors"
+import {
+  BankHttpError,
+  bankResponseError,
+  CliError,
+  EXIT_CODES,
+} from "../errors"
 import {
   validateExportResponse,
   validatePdf,
@@ -232,6 +237,59 @@ async function downloadReport(
   )
 }
 
+async function fetchTransactionReport(
+  cookie: string,
+  endpoint: string,
+  request: Record<string, string>,
+  format: string,
+  output?: string
+): Promise<TransactionsResult> {
+  let reportCookie = cookie
+  if (format === "xls") {
+    // NLB's XLS report endpoint fails for empty periods; check one page first.
+    const preflight = await nlbPost(endpoint, cookie, {
+      ...request,
+      Report: "",
+    })
+    validateExportResponse(preflight)
+    const transactions = parsePage(
+      preflight,
+      endpoint === "/Retail/Transactions",
+      1,
+      Number(request.PageSize),
+      request.AccountID
+    )
+    if (transactions.rows.length === 0) {
+      return null
+    }
+    reportCookie = mergeCookieHeader(cookie, preflight.setCookies)
+  }
+  try {
+    const res = await downloadReport(
+      await nlbPost(endpoint, reportCookie, {
+        ...request,
+        Report: format === "xls" ? "Excel" : "Pdf",
+      }),
+      reportCookie,
+      endpoint,
+      request.AccountID
+    )
+    return exportReport(res, format, request.AccountID, output)
+  } catch (error) {
+    if (
+      error instanceof BankHttpError &&
+      error.status >= 500 &&
+      error.status < 600
+    ) {
+      const kind = endpoint === "/Retail/Transactions" ? "account" : "card"
+      throw bankResponseError(
+        `NLB could not generate the ${format.toUpperCase()} report for this ${kind} (HTTP ${error.status}). The export may be unsupported for this ${kind} or date range, or temporarily unavailable. Try --format tab, csv, or json.`
+      )
+    }
+    throw error
+  }
+}
+
 function parsePage(
   res: HttpResponse,
   account: boolean,
@@ -309,14 +367,13 @@ export async function fetchTransactions(
     PageNumber: "0",
   }
   if (["xls", "pdf"].includes(format)) {
-    request.Report = format === "xls" ? "Excel" : "Pdf"
-    const res = await downloadReport(
-      await nlbPost(endpoint, cookie, request),
+    return await fetchTransactionReport(
       cookie,
       endpoint,
-      data.AccountID
+      request,
+      format,
+      output
     )
-    return exportReport(res, format, data.AccountID, output)
   }
 
   const rows: string[][] = []

@@ -146,6 +146,7 @@ describe("card transaction exports", () => {
   })
 
   test("downloads XLS with the requested date range and path", async () => {
+    fetchMock.mockResolvedValueOnce(html(page1))
     fetchMock.mockResolvedValueOnce(
       new Response(report, {
         headers: { "content-type": "application/vnd.ms-excel" },
@@ -160,7 +161,7 @@ describe("card transaction exports", () => {
     expect(fs.readFileSync(output)).toEqual(report)
     expect(
       Object.fromEntries(
-        new URLSearchParams(String(fetchMock.mock.calls[0][1]?.body))
+        new URLSearchParams(String(fetchMock.mock.calls[1][1]?.body))
       )
     ).toMatchObject({
       DateFrom: start,
@@ -182,6 +183,7 @@ describe("card transaction exports", () => {
       headers["content-disposition"] =
         'attachment; filename="../../redacted.xls"'
     }
+    fetchMock.mockResolvedValueOnce(html(page1))
     fetchMock.mockResolvedValueOnce(new Response(report, { headers }))
     const result = await exportCards("xls")
     expect(result?.kind).toBe("file")
@@ -285,6 +287,7 @@ describe("card transaction exports", () => {
     ["server error", "error", 500, "application/vnd.ms-excel"],
     ["wrong content type", "not a report", 200, "text/plain"],
   ])("rejects an invalid XLS response: %s", async (_name, body, status, contentType) => {
+    fetchMock.mockResolvedValueOnce(html(page1))
     fetchMock.mockResolvedValueOnce(
       new Response(body, { status, headers: { "content-type": contentType } })
     )
