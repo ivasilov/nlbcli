@@ -23,6 +23,11 @@ test.each([
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nlbcli-report-"))
   vi.spyOn(process, "cwd").mockReturnValue(dir)
   const fetchMock = mockResponse(`report.${format}`, 200, headers[format])
+  if (format === "xls") {
+    fetchMock.mockResolvedValueOnce(
+      new Response(fixture("accounts/page-1.html"))
+    )
+  }
   try {
     const result = await cmdAccountTransactions(
       "session=test",
@@ -41,7 +46,7 @@ test.each([
     expect(
       fs.readFileSync(path.join(dir, "downloads", `redacted.${format}`))
     ).toEqual(fixture(`report.${format}`))
-    const [url, request] = fetchMock.mock.calls[0]
+    const [url, request] = fetchMock.mock.calls[format === "xls" ? 1 : 0]
     expect(url.pathname).toBe("/Retail/Transactions")
     const params = new URLSearchParams(request.body)
     expect(params.get("Report")).toBe(format === "xls" ? "Excel" : "Pdf")

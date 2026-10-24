@@ -42,8 +42,16 @@ function exportTransactions(format: string, output?: string) {
   )
 }
 
-function mockResponse(body: BodyInit | null, init?: ResponseInit) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, init)))
+function mockResponse(
+  body: BodyInit | null,
+  init?: ResponseInit,
+  preflight = false
+) {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(body, init))
+  if (preflight) {
+    fetchMock.mockResolvedValueOnce(new Response(html))
+  }
+  vi.stubGlobal("fetch", fetchMock)
 }
 
 describe("cmdAccountTransactions", () => {
@@ -54,14 +62,18 @@ describe("cmdAccountTransactions", () => {
       directory,
       "chosen filename.without-format-extension"
     )
-    mockResponse(format === "xls" ? xls : html, {
-      headers: {
-        "content-type":
-          format === "xls" ? "application/vnd.ms-excel" : "text/html",
-        "content-disposition":
-          'attachment; filename="different-bank-filename.xls"',
+    mockResponse(
+      format === "xls" ? xls : html,
+      {
+        headers: {
+          "content-type":
+            format === "xls" ? "application/vnd.ms-excel" : "text/html",
+          "content-disposition":
+            'attachment; filename="different-bank-filename.xls"',
+        },
       },
-    })
+      format === "xls"
+    )
 
     const result = await exportTransactions(format, output)
 
@@ -76,7 +88,7 @@ describe("cmdAccountTransactions", () => {
         ? jsonRows
         : [headers, ...(format === "csv" ? normalizedRows : rows)]
     )
-    const request = vi.mocked(fetch).mock.calls[0][1]
+    const request = vi.mocked(fetch).mock.calls.at(-1)?.[1]
     expect(new URLSearchParams(String(request?.body)).get("Report")).toBe(
       format === "xls" ? "Excel" : ""
     )
@@ -85,7 +97,7 @@ describe("cmdAccountTransactions", () => {
   test("validates a sibling temporary file before atomically replacing an existing destination", async () => {
     const output = path.join(directory, "export.xls")
     fs.writeFileSync(output, "previous export")
-    mockResponse(xls)
+    mockResponse(xls, undefined, true)
     const rename = fs.renameSync
     const spy = vi
       .spyOn(fs, "renameSync")
@@ -176,7 +188,7 @@ describe("cmdAccountTransactions", () => {
           default:
             throw new Error(`Unexpected failure case: ${failure}`)
         }
-        mockResponse(body, init)
+        mockResponse(body, init, format === "xls")
 
         await expect(exportTransactions(format, output)).rejects.toThrow()
 
@@ -229,9 +241,13 @@ describe("cmdAccountTransactions", () => {
     )
     const output = path.join(directory, "export.xls")
     fs.writeFileSync(output, "previous export")
-    mockResponse(report.replace(closingTag, ""), {
-      headers: { "content-type": "application/vnd.ms-excel" },
-    })
+    mockResponse(
+      report.replace(closingTag, ""),
+      {
+        headers: { "content-type": "application/vnd.ms-excel" },
+      },
+      true
+    )
 
     await expect(exportTransactions("xls", output)).rejects.toThrow(
       "valid XLS file"
@@ -249,9 +265,13 @@ describe("cmdAccountTransactions", () => {
     expect(readTransactionExport("xls", damaged)).toEqual([headers, ...rows])
     const output = path.join(directory, "export.xls")
     fs.writeFileSync(output, "previous export")
-    mockResponse(damaged, {
-      headers: { "content-type": "application/vnd.ms-excel" },
-    })
+    mockResponse(
+      damaged,
+      {
+        headers: { "content-type": "application/vnd.ms-excel" },
+      },
+      true
+    )
 
     await expect(exportTransactions("xls", output)).rejects.toThrow(
       "valid XLS file"
@@ -263,7 +283,7 @@ describe("cmdAccountTransactions", () => {
 
   test("rejects an XLS response truncated at a complete sector boundary", async () => {
     const output = path.join(directory, "export.xls")
-    mockResponse(xls.subarray(0, -512))
+    mockResponse(xls.subarray(0, -512), undefined, true)
 
     await expect(exportTransactions("xls", output)).rejects.toThrow(
       "valid XLS file"
@@ -274,7 +294,9 @@ describe("cmdAccountTransactions", () => {
 
   test("rejects SpreadsheetML without a worksheet", async () => {
     mockResponse(
-      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"></Workbook>'
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"></Workbook>',
+      undefined,
+      true
     )
     await expect(
       exportTransactions("xls", path.join(directory, "export.xls"))
@@ -285,7 +307,7 @@ describe("cmdAccountTransactions", () => {
   test("cleans up when the atomic rename fails", async () => {
     const output = path.join(directory, "export.xls")
     fs.writeFileSync(output, "previous export")
-    mockResponse(xls)
+    mockResponse(xls, undefined, true)
     vi.spyOn(fs, "renameSync").mockImplementation(() => {
       throw new Error("Rename failed")
     })
@@ -303,7 +325,7 @@ describe("cmdAccountTransactions", () => {
   )("does not commit an incomplete %s temporary file", async (format) => {
     const output = path.join(directory, "export")
     fs.writeFileSync(output, "previous export")
-    mockResponse(format === "xls" ? xls : html)
+    mockResponse(format === "xls" ? xls : html, undefined, format === "xls")
     const write = fs.writeFileSync
     vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, options) => {
       write(file, Buffer.isBuffer(data) ? data.subarray(0, -1) : data, options)
@@ -333,12 +355,15 @@ describe("cmdAccountTransactions", () => {
   test("rejects HTML returned for an XLS export", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response("<html>Not a spreadsheet</html>", {
-          status: 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
-        })
-      )
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(html))
+        .mockResolvedValue(
+          new Response("<html>Not a spreadsheet</html>", {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          })
+        )
     )
 
     await expect(

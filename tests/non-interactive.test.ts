@@ -274,6 +274,7 @@ test("interrupted response bodies are network errors", async () => {
 test("invalid report files use the bank response exit code", async () => {
   fetchMock
     .mockResolvedValueOnce(new Response(balances))
+    .mockResolvedValueOnce(new Response(rows))
     .mockResolvedValueOnce(new Response("<html>No report</html>"))
   expect(
     await runCli([
