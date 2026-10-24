@@ -103,6 +103,8 @@ nlbcli cards transactions <CARD_ID> \
 
 Exports are validated in a temporary file beside the destination, then atomically replace it. Failed or incomplete exports leave an existing destination unchanged and remove temporary files. Save confirmations go to stderr.
 
+When NLB returns an HTML wrapper for an XLS or PDF report, the CLI downloads the file from the wrapper's bank report URL and validates that file before saving it.
+
 Account and card JSON/CSV transactions follow a stable contract: dates use `YYYY-MM-DD`, monetary values are exact decimal **strings**, and missing values are `null` in JSON or empty cells in CSV. Empty results are `[]` in JSON and headers only in CSV. Use decimal arithmetic when calculating monetary totals to preserve precision.
 
 When building an importer, validating exports, or handling bank value normalization, read the [v1 transaction export contract](docs/transaction-exports.md). It defines account and card fields, exact CSV headers, JSON Schemas and examples, normalization rules, validation guarantees, and version compatibility.
