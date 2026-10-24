@@ -20,6 +20,11 @@ when a query has no matches. The account header and all customer data are remove
 zero-based pager links from a live account response. All transaction values are
 synthetic; customer details, identifiers, and links have been removed.
 
+`accounts/report-wrapper.html` is a minimized live account report response. The
+bank returns a hidden iframe pointing to the generated workbook or PDF instead
+of returning the file directly. Only the iframe is retained; its report identifier
+is synthetic. Card wrapper tests use a synthetic equivalent under `/Cms/`.
+
 `login.html` and `error.html` exercise HTTP 200 failures as well as spoofed report
 headers. `malformed-transactions.html` exercises a truncated row. Tests also
 mutate fixtures to exercise invalid values and missing columns.

@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { load } from "cheerio"
-import { dateFmt } from "../constants"
+import { BASE_URL, dateFmt } from "../constants"
 import { bankResponseError, CliError, EXIT_CODES } from "../errors"
 import {
   validateExportResponse,
@@ -10,7 +10,13 @@ import {
   writeExport,
 } from "../exports"
 import { formatCsv, formatJson, formatTab } from "../formatters"
-import { type HttpResponse, nlbPost } from "../http"
+import {
+  type HttpResponse,
+  mergeCookieHeader,
+  nlbGet,
+  nlbPost,
+  requireHtml,
+} from "../http"
 import {
   ACCOUNT_TRANSACTION_FIELDS,
   CARD_TRANSACTION_FIELDS,
@@ -29,6 +35,7 @@ const defaultPageSize = 100
 const pageLinkPattern = /(?:PageNumber|page)[=('/\s]+(\d+)/i
 const bankPageLinkPattern =
   /SetFormFieldValueAndSubmitForm\([^,]+,\s*["']PageNumber["'],\s*["'](\d+)["']/
+const reportIdentifierPattern = /^[a-zA-Z0-9_-]+$/
 export const cardTransactionFormats = ["tab", "csv", "json", "xls"]
 
 function formatTransactionData(
@@ -164,6 +171,67 @@ function exportReport(
   return saveFile(path.join(downloads, filename), res.body, validate)
 }
 
+function validateAccountTitle(
+  $: ReturnType<typeof load>,
+  expectedAccountId: string
+): void {
+  const accountTitle = $(".widget-title").first()
+  const returnedAccount = accountTitle.find("strong").first().text().trim()
+  if (accountTitle.length > 0 && returnedAccount !== expectedAccountId) {
+    throw bankResponseError(
+      "NLB returned transactions for a different account. The requested account type may not be supported."
+    )
+  }
+}
+
+async function downloadReport(
+  res: HttpResponse,
+  cookie: string,
+  endpoint: string,
+  expectedAccountId: string
+): Promise<HttpResponse> {
+  validateExportResponse(res)
+  const source = res.body.toString("utf-8").trimStart()
+  if (!source.startsWith("<")) {
+    return res
+  }
+  const $ = load(source)
+  const frames = $("iframe[src]")
+  if (frames.length === 0) {
+    return res
+  }
+  requireHtml(res)
+  if (endpoint === "/Retail/Transactions") {
+    validateAccountTitle($, expectedAccountId)
+  }
+
+  // The bank initiates reports with an HTML fragment containing a hidden iframe.
+  // Follow only its report route, never an arbitrary URL with session cookies.
+  let location: URL
+  try {
+    location = new URL(frames.attr("src") ?? "", BASE_URL)
+  } catch {
+    throw bankResponseError("NLB returned an invalid report download location.")
+  }
+  const prefix = `${endpoint.slice(0, endpoint.lastIndexOf("/"))}/RenderReport/`
+  if (
+    frames.length !== 1 ||
+    location.origin !== BASE_URL ||
+    location.username ||
+    location.password ||
+    location.search ||
+    location.hash ||
+    !location.pathname.startsWith(prefix) ||
+    !reportIdentifierPattern.test(location.pathname.slice(prefix.length))
+  ) {
+    throw bankResponseError("NLB returned an invalid report download location.")
+  }
+  return await nlbGet(
+    location.pathname,
+    mergeCookieHeader(cookie, res.setCookies)
+  )
+}
+
 function parsePage(
   res: HttpResponse,
   account: boolean,
@@ -172,16 +240,8 @@ function parsePage(
   expectedAccountId: string
 ) {
   const $ = load(res.body.toString("utf-8"))
-  const accountTitle = $(".widget-title").first()
-  const returnedAccount = accountTitle.find("strong").first().text().trim()
-  if (
-    account &&
-    accountTitle.length > 0 &&
-    returnedAccount !== expectedAccountId
-  ) {
-    throw bankResponseError(
-      "NLB returned transactions for a different account. The requested account type may not be supported."
-    )
+  if (account) {
+    validateAccountTitle($, expectedAccountId)
   }
   const parsed = parseTransactions(res, account ? "account" : "card")
   return { ...parsed, ...pagination($, currentPage, requestedPageSize) }
@@ -250,7 +310,12 @@ export async function fetchTransactions(
   }
   if (["xls", "pdf"].includes(format)) {
     request.Report = format === "xls" ? "Excel" : "Pdf"
-    const res = await nlbPost(endpoint, cookie, request)
+    const res = await downloadReport(
+      await nlbPost(endpoint, cookie, request),
+      cookie,
+      endpoint,
+      data.AccountID
+    )
     return exportReport(res, format, data.AccountID, output)
   }
 
